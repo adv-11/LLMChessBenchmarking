@@ -4,12 +4,13 @@ import autogen
 from autogen import AssistantAgent, UserProxyAgent
 from pathlib import Path
 from autogen.coding import LocalCommandLineCodeExecutor
-from google.colab import userdata
+from dotenv import load_env
+load_env()
 
 llm_config = [ {
 
     "model" : "mistral-large-latest" ,
-    "api_key" : userdata.get("MISTRAL_API_KEY"),
+    "api_key" : os.environ.get("MISTRAL_API_KEY"),
     "api_type": "mistral"
 } ]
 
