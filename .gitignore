@@ -1,2 +1,3 @@
 # Ignore the stockfish directory and all its contents
 stockfish/
+.env
