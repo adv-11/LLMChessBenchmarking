@@ -1,169 +1,159 @@
 import os
+from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+from langchain.schema import SystemMessage, HumanMessage
 import time
-import json
 import chess
-import chess.svg
-from IPython.display import display, SVG
-import random
+import chess.engine  # Ensure this import works
 from stockfish import Stockfish
-import openai
+
+# Load environment variables from the .env file
+load_dotenv()
 
 # Set your OpenAI API key from the environment variable
-openai.api_key = os.environ.get("ADV_OPENAI_DEV")
+OPENAI_API_KEY = os.environ.get("ADV_OPENAI_DEV")
 
-# Stockfish configuration (maximum difficulty)
-STOCKFISH_PATH = "stockfish/stockfish-windows-x86-64-avx2.exe"  # Adjust as needed
-stockfish = Stockfish(path=STOCKFISH_PATH)
-stockfish.set_skill_level(20)
+# Instantiate the LangChain ChatOpenAI model (using GPT-4)
+chat = ChatOpenAI(model_name="gpt-4", temperature=0.0, api_key=OPENAI_API_KEY)
 
-# Scoring weights and parameters
-RESULT_WEIGHT = 0.5          # Weight for game result (win/draw/loss)
-MOVES_WEIGHT = 0.3           # Penalty for long games (moves beyond 20)
-MATCHING_MOVES_WEIGHT = 0.2  # Bonus for each move matching Stockfish's best move
-TIME_WEIGHT = 0.1           # Penalty for longer decision times
-
-# Initialize the chess board
-board = chess.Board()
+STOCKFISH_PATH = "stockfish/stockfish-windows-x86-64-avx2.exe"  # Set the path to your Stockfish binary here
 
 def llm_make_move(conversation_history: str) -> str:
     """
-    Generate the next move for White using GPT-4, using the conversation history as context.
-    The prompt instructs the LLM to play to win, returning only the best move in UCI format.
+    Generate the next move for White using LangChain's ChatOpenAI (GPT-4),
+    providing the conversation history as context.
     """
+    # Improved prompt to specify only legal UCI moves
     prompt = (
         f"You are a chess grandmaster playing as White. Your objective is to win. "
-        f"Here is the move history so far:\n{conversation_history}\n"
-        "Based on the current board, provide your best next move in UCI format (e.g., e2e4) with no extra commentary."
+        f"Here is the move history so far (White moves first):\n"
+        f"{conversation_history}\n"
+        "Please provide the best next move for White in UCI format (e.g., e2e4). "
+        "Only respond with the move in UCI format, without any additional text or explanation. "
+        "Make sure the move is legal according to the current board state."
     )
     
-    # Using the new ChatCompletion API format:
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You are a chess grandmaster. Provide only the best move in UCI format."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.0
-    )
+    # Use LangChain's ChatOpenAI to generate a response
+    messages = [
+        SystemMessage(content="You are a chess grandmaster. Respond only with a valid UCI move."),
+        HumanMessage(content=prompt)
+    ]
     
-    move = response["choices"][0]["message"]["content"].strip()
+    # Invoke the chat model to get a response
+    response = chat.invoke(messages)
+    
+    # Extract the move from the response content
+    move = response.content.strip()
+
+    # Ensure the move is in UCI format (length 4 or 5)
+    if len(move) not in [4, 5]:
+        print(f"Invalid move received: {move}. Asking LLM to regenerate...")
+        return llm_make_move(conversation_history)  # Retry if the move is invalid
+    
     return move
 
-def get_stockfish_best_move() -> str:
+def get_stockfish_move(board):
     """
-    Get Stockfish's best move (for Black) based on the current board state.
-    Stockfish is set to maximum difficulty (level 20).
+    Get the best move from Stockfish.
+    This function uses Stockfish to evaluate the board and return the best move in UCI format.
     """
-    stockfish.set_fen_position(board.fen())
-    move = stockfish.get_best_move()
-    return move
+    try:
+        # Open the Stockfish engine and get the best move
+        with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as stockfish:
+            result = stockfish.play(board, chess.engine.Limit(time=1.0))  # 1-second thinking time
+            return result.move.uci()
+    except Exception as e:
+        print(f"Error occurred while interacting with Stockfish: {e}")
+        return None
 
-def evaluate_performance(llm_moves: int, result: str, matching_moves: int, time_taken: float) -> dict:
+def is_legal_move(move: str, board: chess.Board) -> bool:
     """
-    Improved scoring function:
-      - Game Result: 3 points for win, 1 for draw, 0 for loss.
-      - Moves: Penalty of -0.1 for each move beyond 20 moves.
-      - Matching moves: Bonus of +0.5 for each time the LLM's move matches Stockfish's best move.
-      - Time: Penalty of -0.05 per second if total decision time exceeds 5 seconds.
+    Check if the given move is legal according to the current board state.
     """
-    result_score = 3 if result == "win" else (1 if result == "draw" else 0)
-    moves_penalty = -0.1 * (llm_moves - 20) if llm_moves > 20 else 0
-    matching_moves_score = 0.5 * matching_moves
-    time_penalty = -0.05 * time_taken if time_taken > 5 else 0
-
-    score = (RESULT_WEIGHT * result_score) + (MOVES_WEIGHT * moves_penalty) + \
-            (MATCHING_MOVES_WEIGHT * matching_moves_score) + (TIME_WEIGHT * time_penalty)
-
-    return {
-        'score': score,
-        'result': result,
-        'moves': llm_moves,
-        'matching_moves': matching_moves,
-        'time_taken': time_taken
-    }
+    try:
+        chess.Move.from_uci(move)  # Try to parse the move using UCI format
+        if move not in [m.uci() for m in board.legal_moves]:
+            return False
+        return True
+    except ValueError:
+        return False
 
 def play_game():
     """
-    Plays a complete game between the LLM (White) and Stockfish (Black).
-    The LLM receives the conversation history (move list so far) as context.
-    Returns a dictionary with the move list, final result, and performance metrics.
+    Simulate a chess game between White (AI-powered LLM) and Black (Stockfish).
     """
-    board.reset()
-    move_count = 0
-    matching_moves = 0
-    start_time = time.time()
-    conversation_history = ""  # For storing the move history
-    game_moves = []  # List of tuples: (Color, move)
-
+    board = chess.Board()  # Initialize the chess board
+    conversation_history = ""  # Initialize conversation history
+    
+    # Play the game until it's over
     while not board.is_game_over():
-        # LLM's move (White)
+        # Get move for White (LLM)
         move_white = llm_make_move(conversation_history)
-        if move_white is None:
-            break
-        # Validate move legality; if illegal, fallback to a random legal move
-        if chess.Move.from_uci(move_white) not in board.legal_moves:
-            legal_moves = list(board.legal_moves)
-            move_white = random.choice(legal_moves).uci() if legal_moves else None
-        game_moves.append(("White", move_white))
+        
+        # Ensure the move is legal
+        if not is_legal_move(move_white, board):
+            print(f"Illegal move received: {move_white}. Asking LLM to regenerate...")
+            conversation_history += f"LLM generated an illegal move: {move_white}. Regenerating...\n"
+            continue  # Skip this move and retry
+        
+        print(f"White Move: {move_white}")
+        
+        # Try to push the move to the board
+        try:
+            board.push(chess.Move.from_uci(move_white))
+        except chess.InvalidMoveError:
+            print(f"Invalid move received from LLM: {move_white}. Retrying...")
+            continue  # Skip this move and retry
+        
         conversation_history += f"White: {move_white}\n"
-        board.push(chess.Move.from_uci(move_white))
         
         if board.is_game_over():
             break
         
-        # Stockfish's move (Black)
-        move_black = get_stockfish_best_move()
-        game_moves.append(("Black", move_black))
+        # Get move for Black (Stockfish)
+        move_black = get_stockfish_move(board)
+        
+        if not move_black:
+            print("Error with Stockfish. Exiting game.")
+            break  # Exit the game if there's an issue with Stockfish
+        
+        print(f"Black Move: {move_black}")
+        
+        # Ensure the move is legal for Black
+        if not is_legal_move(move_black, board):
+            print(f"Illegal move received from Stockfish: {move_black}. Retrying...")
+            continue  # Skip this move and retry
+        
+        # Try to push the move to the board
+        try:
+            board.push(chess.Move.from_uci(move_black))
+        except chess.InvalidMoveError:
+            print(f"Invalid move received from Stockfish: {move_black}. Retrying...")
+            continue  # Skip this move and retry
+        
         conversation_history += f"Black: {move_black}\n"
-        board.push(chess.Move.from_uci(move_black))
-        
-        # Matching move bonus if LLM's move exactly matches Stockfish's best move
-        if move_white == move_black:
-            matching_moves += 1
-        
-        move_count += 1
-        print(f"Move {move_count}: {move_white} (White) vs {move_black} (Black)")
-
-    # Determine the final result from White's perspective.
-    # Note: This simple logic assumes that if board.turn is White at game over, then Black just moved and White is winning.
-    result = "draw" if board.is_stalemate() else ("win" if board.turn == chess.WHITE else "loss")
-    end_time = time.time()
-    time_taken = end_time - start_time
-    performance = evaluate_performance(move_count, result, matching_moves, time_taken)
     
-    game_details = {
-        'moves': game_moves,
-        'final_result': result,
-        'performance': performance
-    }
-    return game_details
+    return board.result()
 
 def run_benchmark():
     """
-    Runs multiple games, calculates the average score for the LLM over all games,
-    and outputs the results in JSON format with a top-level 'total_score_avg' field.
+    Run the chess benchmarking process.
     """
-    games_to_play = 10  # Adjust as needed
-    final_leaderboard = []
     total_score = 0
-
-    for game in range(games_to_play):
-        print(f"Starting Game {game + 1}...")
+    total_games = 5  # Example, you can adjust based on your needs
+    for game_num in range(1, total_games + 1):
+        print(f"Starting Game {game_num}...")
         game_result = play_game()
-        final_leaderboard.append(game_result)
-        total_score += game_result['performance']['score']
-        print(f"Game {game + 1} Result: {game_result['final_result']}\n")
+        print(f"Game {game_num} result: {game_result}")
+        
+        # Update score or any other metrics based on the game result
+        if game_result == "1-0":
+            total_score += 1  # White wins
+        elif game_result == "0-1":
+            total_score -= 1  # Black wins
     
-    avg_score = total_score / games_to_play if games_to_play else 0
-    output = {
-        'total_score_avg': avg_score,
-        'games': final_leaderboard
-    }
-    final_leaderboard_json = json.dumps(output, indent=4)
-    print("Leaderboard in JSON format:")
-    print(final_leaderboard_json)
-    with open('leaderboard.json', 'w') as json_file:
-        json.dump(output, json_file, indent=4)
+    avg_score = total_score / total_games
+    print(f"Average Score after {total_games} games: {avg_score}")
 
-# Run the benchmark
-run_benchmark()
+if __name__ == "__main__":
+    run_benchmark()
