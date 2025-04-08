@@ -91,3 +91,137 @@
 2025-04-07 22:31:49,992 - chess_benchmark - INFO - Blunder detected! Eval before: -99.99, after: 99.99
 2025-04-07 22:31:50,359 - chess_benchmark - INFO - Black (Stockfish) move: g7g6
 2025-04-07 22:31:51,185 - chess_benchmark - INFO - New Elo rating: 1499
+2025-04-08 09:31:57,281 - chess_benchmark - INFO - Initialized ChessBenchmark with model: gpt-4, temp: 0.0
+2025-04-08 09:41:58,074 - chess_benchmark - INFO - Starting benchmark with 1 games
+2025-04-08 09:41:58,075 - chess_benchmark - INFO - Starting Game 1/1 with opening: Queens Gambit
+2025-04-08 09:42:03,657 - chess_benchmark - INFO - Black (Stockfish) move: e7e6
+2025-04-08 09:42:04,044 - chess_benchmark - INFO - Position FEN: rnbqkbnr/ppp2ppp/4p3/3p4/2PP4/8/PP2PPPP/RNBQKBNR w KQkq - 0 3
+2025-04-08 09:42:04,044 - chess_benchmark - INFO - Current evaluation: 0.26
+2025-04-08 09:42:05,263 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:05,304 - chess_benchmark - INFO - White (LLM) move: c4d5
+2025-04-08 09:42:06,030 - chess_benchmark - INFO - Black (Stockfish) move: e6d5
+2025-04-08 09:42:06,314 - chess_benchmark - INFO - Position FEN: rnbqkbnr/ppp2ppp/8/3p4/3P4/8/PP2PPPP/RNBQKBNR w KQkq - 0 4
+2025-04-08 09:42:06,329 - chess_benchmark - INFO - Current evaluation: 0.18
+2025-04-08 09:42:08,421 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:08,421 - chess_benchmark - INFO - White (LLM) move: g1f3
+2025-04-08 09:42:09,218 - chess_benchmark - INFO - Black (Stockfish) move: g8f6
+2025-04-08 09:42:09,623 - chess_benchmark - INFO - Position FEN: rnbqkb1r/ppp2ppp/5n2/3p4/3P4/5N2/PP2PPPP/RNBQKB1R w KQkq - 2 5
+2025-04-08 09:42:09,623 - chess_benchmark - INFO - Current evaluation: 0.21
+2025-04-08 09:42:10,434 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:10,434 - chess_benchmark - INFO - White (LLM) move: e2e3
+2025-04-08 09:42:11,244 - chess_benchmark - INFO - Black (Stockfish) move: f8d6
+2025-04-08 09:42:11,684 - chess_benchmark - INFO - Position FEN: rnbqk2r/ppp2ppp/3b1n2/3p4/3P4/4PN2/PP3PPP/RNBQKB1R w KQkq - 1 6
+2025-04-08 09:42:11,684 - chess_benchmark - INFO - Current evaluation: -0.28
+2025-04-08 09:42:12,623 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:12,626 - chess_benchmark - INFO - White (LLM) move: e3e4
+2025-04-08 09:42:12,933 - chess_benchmark - INFO - Blunder detected! Eval before: -0.28, after: 2.50
+2025-04-08 09:42:13,204 - chess_benchmark - INFO - Black (Stockfish) move: d5e4
+2025-04-08 09:42:13,539 - chess_benchmark - INFO - Position FEN: rnbqk2r/ppp2ppp/3b1n2/8/3Pp3/5N2/PP3PPP/RNBQKB1R w KQkq - 0 7
+2025-04-08 09:42:13,544 - chess_benchmark - INFO - Current evaluation: -2.54
+2025-04-08 09:42:14,314 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:14,329 - chess_benchmark - INFO - White (LLM) move: f3e5
+2025-04-08 09:42:14,657 - chess_benchmark - INFO - Blunder detected! Eval before: -2.54, after: 2.39
+2025-04-08 09:42:14,985 - chess_benchmark - INFO - Black (Stockfish) move: d6e5
+2025-04-08 09:42:15,320 - chess_benchmark - INFO - Position FEN: rnbqk2r/ppp2ppp/5n2/4b3/3Pp3/8/PP3PPP/RNBQKB1R w KQkq - 0 8
+2025-04-08 09:42:15,320 - chess_benchmark - INFO - Current evaluation: -2.32
+2025-04-08 09:42:16,927 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:16,927 - chess_benchmark - INFO - White (LLM) move: d4e5
+2025-04-08 09:42:17,235 - chess_benchmark - INFO - Blunder detected! Eval before: -2.32, after: 2.26
+2025-04-08 09:42:17,532 - chess_benchmark - INFO - Black (Stockfish) move: d8d1
+2025-04-08 09:42:17,844 - chess_benchmark - INFO - Position FEN: rnb1k2r/ppp2ppp/5n2/4P3/4p3/8/PP3PPP/RNBqKB1R w KQkq - 0 9
+2025-04-08 09:42:17,844 - chess_benchmark - INFO - Current evaluation: -2.17
+2025-04-08 09:42:18,547 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:18,553 - chess_benchmark - INFO - White (LLM) move: e1d1
+2025-04-08 09:42:18,887 - chess_benchmark - INFO - Blunder detected! Eval before: -2.17, after: 2.30
+2025-04-08 09:42:19,199 - chess_benchmark - INFO - Black (Stockfish) move: f6g4
+2025-04-08 09:42:19,489 - chess_benchmark - INFO - Position FEN: rnb1k2r/ppp2ppp/8/4P3/4p1n1/8/PP3PPP/RNBK1B1R w kq - 1 10
+2025-04-08 09:42:19,504 - chess_benchmark - INFO - Current evaluation: -2.43
+2025-04-08 09:42:20,325 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:20,328 - chess_benchmark - INFO - White (LLM) move: f2f3
+2025-04-08 09:42:20,626 - chess_benchmark - INFO - Blunder detected! Eval before: -2.43, after: 3.77
+2025-04-08 09:42:20,908 - chess_benchmark - INFO - Black (Stockfish) move: g4f2
+2025-04-08 09:42:21,219 - chess_benchmark - INFO - Position FEN: rnb1k2r/ppp2ppp/8/4P3/4p3/5P2/PP3nPP/RNBK1B1R w kq - 1 11
+2025-04-08 09:42:21,219 - chess_benchmark - INFO - Current evaluation: -3.62
+2025-04-08 09:42:22,191 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:22,206 - chess_benchmark - INFO - White (LLM) move: d1e2
+2025-04-08 09:42:22,531 - chess_benchmark - INFO - Blunder detected! Eval before: -3.62, after: 4.13
+2025-04-08 09:42:22,808 - chess_benchmark - INFO - Black (Stockfish) move: f2h1
+2025-04-08 09:42:23,072 - chess_benchmark - INFO - Position FEN: rnb1k2r/ppp2ppp/8/4P3/4p3/5P2/PP2K1PP/RNB2B1n w kq - 0 12
+2025-04-08 09:42:23,072 - chess_benchmark - INFO - Current evaluation: -3.86
+2025-04-08 09:42:24,170 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:24,170 - chess_benchmark - INFO - White (LLM) move: f3e4
+2025-04-08 09:42:24,469 - chess_benchmark - INFO - Blunder detected! Eval before: -3.86, after: 4.36
+2025-04-08 09:42:24,739 - chess_benchmark - INFO - Black (Stockfish) move: c8g4
+2025-04-08 09:42:25,010 - chess_benchmark - INFO - Position FEN: rn2k2r/ppp2ppp/8/4P3/4P1b1/8/PP2K1PP/RNB2B1n w kq - 1 13
+2025-04-08 09:42:25,017 - chess_benchmark - INFO - Current evaluation: -4.20
+2025-04-08 09:42:25,795 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:25,795 - chess_benchmark - INFO - White (LLM) move: e2d2
+2025-04-08 09:42:26,084 - chess_benchmark - INFO - Blunder detected! Eval before: -4.20, after: 4.59
+2025-04-08 09:42:26,343 - chess_benchmark - INFO - Black (Stockfish) move: h1g3
+2025-04-08 09:42:26,615 - chess_benchmark - INFO - Position FEN: rn2k2r/ppp2ppp/8/4P3/4P1b1/6n1/PP1K2PP/RNB2B2 w kq - 3 14
+2025-04-08 09:42:26,620 - chess_benchmark - INFO - Current evaluation: -4.62
+2025-04-08 09:42:27,383 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:27,387 - chess_benchmark - INFO - White (LLM) move: h2g3
+2025-04-08 09:42:27,676 - chess_benchmark - INFO - Blunder detected! Eval before: -4.62, after: 4.27
+2025-04-08 09:42:27,975 - chess_benchmark - INFO - Black (Stockfish) move: b8c6
+2025-04-08 09:42:28,250 - chess_benchmark - INFO - Position FEN: r3k2r/ppp2ppp/2n5/4P3/4P1b1/6P1/PP1K2P1/RNB2B2 w kq - 1 15
+2025-04-08 09:42:28,250 - chess_benchmark - INFO - Current evaluation: -4.66
+2025-04-08 09:42:28,961 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:28,968 - chess_benchmark - INFO - White (LLM) move: e5e6
+2025-04-08 09:42:29,260 - chess_benchmark - INFO - Blunder detected! Eval before: -4.66, after: 4.79
+2025-04-08 09:42:29,531 - chess_benchmark - INFO - Black (Stockfish) move: e8c8
+2025-04-08 09:42:29,801 - chess_benchmark - INFO - Position FEN: 2kr3r/ppp2ppp/2n1P3/8/4P1b1/6P1/PP1K2P1/RNB2B2 w - - 1 16
+2025-04-08 09:42:29,801 - chess_benchmark - INFO - Current evaluation: -5.04
+2025-04-08 09:42:30,785 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:30,903 - chess_benchmark - INFO - White (LLM) move: d2e3
+2025-04-08 09:42:31,212 - chess_benchmark - INFO - Blunder detected! Eval before: -5.04, after: 4.91
+2025-04-08 09:42:31,474 - chess_benchmark - INFO - Black (Stockfish) move: g4e6
+2025-04-08 09:42:31,736 - chess_benchmark - INFO - Position FEN: 2kr3r/ppp2ppp/2n1b3/8/4P3/4K1P1/PP4P1/RNB2B2 w - - 0 17
+2025-04-08 09:42:31,736 - chess_benchmark - INFO - Current evaluation: -4.81
+2025-04-08 09:42:32,693 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:32,693 - chess_benchmark - INFO - White (LLM) move: e4e5
+2025-04-08 09:42:32,994 - chess_benchmark - INFO - Blunder detected! Eval before: -4.81, after: 6.06
+2025-04-08 09:42:33,273 - chess_benchmark - INFO - Black (Stockfish) move: c6e5
+2025-04-08 09:42:33,545 - chess_benchmark - INFO - Position FEN: 2kr3r/ppp2ppp/4b3/4n3/8/4K1P1/PP4P1/RNB2B2 w - - 0 18
+2025-04-08 09:42:33,546 - chess_benchmark - INFO - Current evaluation: -5.81
+2025-04-08 09:42:34,394 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:34,397 - chess_benchmark - INFO - White (LLM) move: f1e2
+2025-04-08 09:42:34,697 - chess_benchmark - INFO - Blunder detected! Eval before: -5.81, after: 6.34
+2025-04-08 09:42:34,974 - chess_benchmark - INFO - Black (Stockfish) move: e6g4
+2025-04-08 09:42:35,243 - chess_benchmark - INFO - Position FEN: 2kr3r/ppp2ppp/8/4n3/6b1/4K1P1/PP2B1P1/RNB5 w - - 2 19
+2025-04-08 09:42:35,243 - chess_benchmark - INFO - Current evaluation: -6.86
+2025-04-08 09:42:35,933 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:35,938 - chess_benchmark - INFO - White (LLM) move: e2g4
+2025-04-08 09:42:36,235 - chess_benchmark - INFO - Blunder detected! Eval before: -6.86, after: 6.72
+2025-04-08 09:42:36,532 - chess_benchmark - INFO - Black (Stockfish) move: e5g4
+2025-04-08 09:42:36,811 - chess_benchmark - INFO - Position FEN: 2kr3r/ppp2ppp/8/8/6n1/4K1P1/PP4P1/RNB5 w - - 0 20
+2025-04-08 09:42:36,811 - chess_benchmark - INFO - Current evaluation: -6.78
+2025-04-08 09:42:37,679 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:37,683 - chess_benchmark - INFO - White (LLM) move: e3f4
+2025-04-08 09:42:37,985 - chess_benchmark - INFO - Blunder detected! Eval before: -6.78, after: 6.69
+2025-04-08 09:42:38,313 - chess_benchmark - INFO - Black (Stockfish) move: h7h5
+2025-04-08 09:42:38,586 - chess_benchmark - INFO - Position FEN: 2kr3r/ppp2pp1/8/7p/5Kn1/6P1/PP4P1/RNB5 w - - 0 21
+2025-04-08 09:42:38,587 - chess_benchmark - INFO - Current evaluation: -6.60
+2025-04-08 09:42:39,469 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:39,475 - chess_benchmark - INFO - White (LLM) move: f4g5
+2025-04-08 09:42:39,753 - chess_benchmark - INFO - Blunder detected! Eval before: -6.60, after: 7.16
+2025-04-08 09:42:40,023 - chess_benchmark - INFO - Black (Stockfish) move: d8d5
+2025-04-08 09:42:40,280 - chess_benchmark - INFO - Position FEN: 2k4r/ppp2pp1/8/3r2Kp/6n1/6P1/PP4P1/RNB5 w - - 2 22
+2025-04-08 09:42:40,280 - chess_benchmark - INFO - Current evaluation: -7.31
+2025-04-08 09:42:41,066 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:41,075 - chess_benchmark - INFO - White (LLM) move: g5f4
+2025-04-08 09:42:41,364 - chess_benchmark - INFO - Blunder detected! Eval before: -7.31, after: 99.96
+2025-04-08 09:42:41,628 - chess_benchmark - INFO - Black (Stockfish) move: h8e8
+2025-04-08 09:42:41,891 - chess_benchmark - INFO - Position FEN: 2k1r3/ppp2pp1/8/3r3p/5Kn1/6P1/PP4P1/RNB5 w - - 4 23
+2025-04-08 09:42:41,891 - chess_benchmark - INFO - Current evaluation: -99.97
+2025-04-08 09:42:42,751 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:42,751 - chess_benchmark - INFO - White (LLM) move: c1e3
+2025-04-08 09:42:43,044 - chess_benchmark - INFO - Blunder detected! Eval before: -99.97, after: 99.98
+2025-04-08 09:42:43,301 - chess_benchmark - INFO - Black (Stockfish) move: g7g5
+2025-04-08 09:42:43,551 - chess_benchmark - INFO - Position FEN: 2k1r3/ppp2p2/8/3r2pp/5Kn1/4B1P1/PP4P1/RN6 w - - 0 24
+2025-04-08 09:42:43,551 - chess_benchmark - INFO - Current evaluation: -99.99
+2025-04-08 09:42:44,442 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-04-08 09:42:44,442 - chess_benchmark - INFO - White (LLM) move: f4f3
+2025-04-08 09:42:44,712 - chess_benchmark - INFO - Blunder detected! Eval before: -99.99, after: 99.99
+2025-04-08 09:42:44,968 - chess_benchmark - INFO - Black (Stockfish) move: e8e3
+2025-04-08 09:42:45,468 - chess_benchmark - INFO - New Elo rating: 1499

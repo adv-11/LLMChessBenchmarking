@@ -2,6 +2,7 @@ import os
 import time
 import json
 import random
+from typing import Optional
 import numpy as np
 import chess
 import chess.engine
@@ -10,9 +11,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain.schema import SystemMessage, HumanMessage
-# Removed unused import
 import matplotlib.pyplot as plt
-# Removed unused import
 
 # Load environment variables from the .env file
 load_dotenv()
@@ -113,6 +112,10 @@ class ChessBenchmark:
         visual_board = self._get_visual_board(board)
         legal_moves = [move.uci() for move in board.legal_moves]
         
+        if not legal_moves:
+            logger.warning("No legal moves available - game should be over")
+            return None
+        
         # Create an improved prompt with more context
         prompt = (
             f"You are a chess grandmaster playing as White. Your objective is to win. "
@@ -171,8 +174,12 @@ class ChessBenchmark:
             thinking_time (float): Time in seconds for Stockfish to think
             
         Returns:
-            str: UCI move string
+            str: UCI move string or None if no legal moves
         """
+        if len(list(board.legal_moves)) == 0:
+            logger.warning("No legal moves available for Stockfish")
+            return None
+            
         try:
             with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as stockfish:
                 # Set options for more consistent play if needed
@@ -313,37 +320,61 @@ class ChessBenchmark:
         Returns:
             str: Path to the saved PGN file
         """
-        # Create a new game
-        game = chess.pgn.Game()
+        try:
+            # Create a new game
+            game = chess.pgn.Game()
+            
+            # Set game headers
+            game.headers["Event"] = "LLM Chess Benchmark"
+            game.headers["Site"] = "LLM vs Stockfish"
+            game.headers["Date"] = datetime.now().strftime("%Y.%m.%d")
+            game.headers["Round"] = str(self.stats["games_played"])
+            game.headers["White"] = f"LLM ({self.llm_model})"
+            game.headers["Black"] = f"Stockfish (Depth {self.stockfish_depth})"
+            game.headers["Result"] = game_data["result"]
+            
+            # Add custom headers
+            game.headers["LLMBlunders"] = str(game_data["llm_blunders"])
+            game.headers["FinalEval"] = str(game_data["final_eval"])
+            game.headers["Opening"] = game_data["opening"] if game_data["opening"] else "Unknown"
+            
+            # Set up game moves - we'll validate each move before adding
+            node = game
+            
+            # Create a fresh board to validate moves
+            setup_board = chess.Board()
+            if game_data.get("starting_fen"):
+                setup_board.set_fen(game_data["starting_fen"])
+            
+            # Add each move one by one, validating them
+            for move_uci in game_data["moves"]:
+                try:
+                    move = chess.Move.from_uci(move_uci)
+                    
+                    # Check if the move is legal in the current position
+                    if move in setup_board.legal_moves:
+                        node = node.add_variation(move)
+                        setup_board.push(move)
+                    else:
+                        logger.warning(f"Illegal move {move_uci} detected in PGN creation, skipping")
+                except Exception as e:
+                    logger.error(f"Error processing move {move_uci}: {e}")
+                    # Skip invalid moves
+                    continue
+            
+            # Save to file
+            filename = f"{self.results_dir}/game_{self.stats['games_played']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pgn"
+            with open(filename, "w") as f:
+                f.write(str(game))
         
-        # Set game headers
-        game.headers["Event"] = "LLM Chess Benchmark"
-        game.headers["Site"] = "LLM vs Stockfish"
-        game.headers["Date"] = datetime.now().strftime("%Y.%m.%d")
-        game.headers["Round"] = str(self.stats["games_played"])
-        game.headers["White"] = f"LLM ({self.llm_model})"
-        game.headers["Black"] = f"Stockfish (Depth {self.stockfish_depth})"
-        game.headers["Result"] = game_data["result"]
-        
-        # Add custom headers
-        game.headers["LLMBlunders"] = str(game_data["llm_blunders"])
-        game.headers["FinalEval"] = str(game_data["final_eval"])
-        game.headers["Opening"] = game_data["opening"] if game_data["opening"] else "Unknown"
-        
-        # Set up game moves
-        node = game
-        moves = game_data["moves"]
-        
-        # Reconstruct the game from the moves
-        for move_uci in moves:
-            node = node.add_variation(chess.Move.from_uci(move_uci))
-        
-        # Save to file
-        filename = f"{self.results_dir}/game_{self.stats['games_played']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pgn"
-        with open(filename, "w") as f:
-            f.write(str(game))
-    
-        return filename
+            return filename
+        except Exception as e:
+            logger.error(f"Error saving game to PGN: {e}")
+            # Create a simplified PGN file as fallback
+            fallback_filename = f"{self.results_dir}/game_{self.stats['games_played']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_fallback.txt"
+            with open(fallback_filename, "w") as f:
+                f.write(f"Game data: {json.dumps(game_data, indent=2)}")
+            return fallback_filename
     
     def generate_report(self):
         """
@@ -358,11 +389,19 @@ class ChessBenchmark:
         # Calculate win percentage
         win_rate = self.stats["llm_wins"] / self.stats["games_played"] * 100
         
-        # Calculate average game length
-        avg_game_length = sum([len(game["moves"]) for game in self.stats["game_history"]]) / (2 * self.stats["games_played"])
+        # Calculate average game length - use try/except to handle potential errors
+        try:
+            avg_game_length = sum([len(game["moves"]) for game in self.stats["game_history"]]) / (2 * max(1, self.stats["games_played"]))
+        except Exception:
+            avg_game_length = 0
         
-        # Calculate average evaluation trend
-        eval_trend = np.mean([game["eval_history"][-1] - game["eval_history"][0] for game in self.stats["game_history"] if game["eval_history"]])
+        # Calculate average evaluation trend with error handling
+        try:
+            eval_trend = np.mean([game["eval_history"][-1] - game["eval_history"][0] 
+                                for game in self.stats["game_history"] 
+                                if game["eval_history"] and len(game["eval_history"]) > 1])
+        except Exception:
+            eval_trend = 0
         
         # Calculate blunder rate
         blunder_rate = self.stats["blunders"] / max(1, self.stats["total_moves"] / 2) * 100
@@ -376,7 +415,7 @@ class ChessBenchmark:
             "avg_move_time": self.stats["avg_move_time"],
             "blunder_rate": blunder_rate,
             "illegal_move_rate": self.stats["illegal_moves"] / max(1, self.stats["total_moves"] / 2) * 100,
-            "opening_success_rate": (self.stats["opening_success"] / self.stats["games_played"]) * 100,
+            "opening_success_rate": (self.stats["opening_success"] / max(1, self.stats["games_played"])) * 100,
             "position_eval_trend": eval_trend,
             "elo_rating": self.stats["elo_rating"],
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -385,7 +424,7 @@ class ChessBenchmark:
         # Save report to file
         report_file = f"{self.results_dir}/benchmark_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         with open(report_file, "w") as f:
-            json.dump(report, f, indent=4)
+            json.dump(report, f, indent=2)
         
         return report
     
@@ -402,73 +441,80 @@ class ChessBenchmark:
         # Create a list to store generated file paths
         visualization_files = []
         
-        # 1. Win/Loss/Draw pie chart
-        plt.figure(figsize=(10, 6))
-        labels = ['LLM Wins', 'Stockfish Wins', 'Draws']
-        sizes = [self.stats["llm_wins"], self.stats["stockfish_wins"], self.stats["draws"]]
-        colors = ['lightgreen', 'lightcoral', 'lightskyblue']
-        plt.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=140)
-        plt.axis('equal')
-        plt.title(f'Game Outcomes ({self.llm_model} vs Stockfish)')
-        
-        pie_chart_file = f"{self.results_dir}/game_outcomes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        plt.savefig(pie_chart_file)
-        plt.close()
-        visualization_files.append(pie_chart_file)
-        
-        # 2. Evaluation over moves (aggregated across games)
-        plt.figure(figsize=(12, 6))
-        
-        # Plot each game's evaluation history
-        for i, game in enumerate(self.stats["game_history"]):
-            if game["eval_history"]:
-                x = list(range(len(game["eval_history"])))
-                y = [eval_score / 100 for eval_score in game["eval_history"]]  # Convert to pawn units
-                plt.plot(x, y, alpha=0.3, label=f"Game {i+1}" if i < 5 else "")
-        
-        # Plot the average evaluation trend
-        all_evals = []
-        max_length = max([len(game["eval_history"]) for game in self.stats["game_history"] if game["eval_history"]], default=0)
-        
-        if max_length > 0:
-            for i in range(max_length):
-                valid_evals = [game["eval_history"][i] for game in self.stats["game_history"] 
-                              if game["eval_history"] and i < len(game["eval_history"])]
-                if valid_evals:
-                    all_evals.append(sum(valid_evals) / len(valid_evals))
+        try:
+            # 1. Win/Loss/Draw pie chart
+            plt.figure(figsize=(10, 6))
+            labels = ['LLM Wins', 'Stockfish Wins', 'Draws']
+            sizes = [self.stats["llm_wins"], self.stats["stockfish_wins"], self.stats["draws"]]
+            colors = ['lightgreen', 'lightcoral', 'lightskyblue']
+            plt.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=140)
+            plt.axis('equal')
+            plt.title(f'Game Outcomes ({self.llm_model} vs Stockfish)')
             
-            if all_evals:
-                plt.plot(range(len(all_evals)), [e/100 for e in all_evals], 'k-', linewidth=2, label="Average")
+            pie_chart_file = f"{self.results_dir}/game_outcomes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            plt.savefig(pie_chart_file)
+            plt.close()
+            visualization_files.append(pie_chart_file)
+            
+            # 2. Evaluation over moves (aggregated across games)
+            plt.figure(figsize=(12, 6))
+            
+            # Plot each game's evaluation history
+            for i, game in enumerate(self.stats["game_history"]):
+                if game.get("eval_history") and len(game["eval_history"]) > 1:
+                    x = list(range(len(game["eval_history"])))
+                    y = [eval_score / 100 for eval_score in game["eval_history"]]  # Convert to pawn units
+                    plt.plot(x, y, alpha=0.3, label=f"Game {i+1}" if i < 5 else "")
+            
+            # Plot the average evaluation trend
+            all_evals = []
+            max_length = max([len(game.get("eval_history", [])) for game in self.stats["game_history"]], default=0)
+            
+            if max_length > 0:
+                for i in range(max_length):
+                    valid_evals = [game["eval_history"][i] for game in self.stats["game_history"] 
+                                if game.get("eval_history") and i < len(game["eval_history"])]
+                    if valid_evals:
+                        all_evals.append(sum(valid_evals) / len(valid_evals))
+                
+                if all_evals:
+                    plt.plot(range(len(all_evals)), [e/100 for e in all_evals], 'k-', linewidth=2, label="Average")
+            
+            plt.axhline(y=0, color='gray', linestyle='-', alpha=0.5)
+            plt.xlabel('Move Number')
+            plt.ylabel('Evaluation (pawns)')
+            plt.title('Position Evaluation Over Time')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            
+            eval_chart_file = f"{self.results_dir}/evaluation_trend_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            plt.savefig(eval_chart_file)
+            plt.close()
+            visualization_files.append(eval_chart_file)
+            
+            # 3. Blunder analysis
+            plt.figure(figsize=(10, 6))
+            blunder_counts = [game.get("llm_blunders", 0) for game in self.stats["game_history"]]
+            if blunder_counts:
+                plt.bar(range(1, len(blunder_counts)+1), blunder_counts, color='indianred')
+                avg_blunders = sum(blunder_counts)/max(1, len(blunder_counts))
+                plt.axhline(y=avg_blunders, color='black', linestyle='--', alpha=0.7, 
+                        label=f'Avg: {avg_blunders:.2f}')
+                plt.xlabel('Game Number')
+                plt.ylabel('Number of Blunders')
+                plt.title('LLM Blunders per Game')
+                plt.legend()
+                plt.grid(True, alpha=0.3)
+                
+                blunder_chart_file = f"{self.results_dir}/blunder_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                plt.savefig(blunder_chart_file)
+                plt.close()
+                visualization_files.append(blunder_chart_file)
         
-        plt.axhline(y=0, color='gray', linestyle='-', alpha=0.5)
-        plt.xlabel('Move Number')
-        plt.ylabel('Evaluation (pawns)')
-        plt.title('Position Evaluation Over Time')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        
-        eval_chart_file = f"{self.results_dir}/evaluation_trend_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        plt.savefig(eval_chart_file)
-        plt.close()
-        visualization_files.append(eval_chart_file)
-        
-        # 3. Blunder analysis
-        plt.figure(figsize=(10, 6))
-        blunder_counts = [game["llm_blunders"] for game in self.stats["game_history"]]
-        plt.bar(range(1, len(blunder_counts)+1), blunder_counts, color='indianred')
-        plt.axhline(y=sum(blunder_counts)/len(blunder_counts), color='black', linestyle='--', alpha=0.7, 
-                   label=f'Avg: {sum(blunder_counts)/len(blunder_counts):.2f}')
-        plt.xlabel('Game Number')
-        plt.ylabel('Number of Blunders')
-        plt.title('LLM Blunders per Game')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        
-        blunder_chart_file = f"{self.results_dir}/blunder_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        plt.savefig(blunder_chart_file)
-        plt.close()
-        visualization_files.append(blunder_chart_file)
-        
+        except Exception as e:
+            logger.error(f"Error generating visualizations: {e}")
+            return [f"Error generating visualizations: {e}"]
+            
         return visualization_files
     
     def play_game(self, opening=None, custom_fen=None):
@@ -483,12 +529,16 @@ class ChessBenchmark:
             dict: Game results and statistics
         """
         # Initialize the board with the specified opening or starting position
+        starting_fen = None
         if custom_fen:
             board = chess.Board(custom_fen)
+            starting_fen = custom_fen
         elif opening and opening in OPENING_POSITIONS:
             board = chess.Board(OPENING_POSITIONS[opening])
+            starting_fen = OPENING_POSITIONS[opening]
         else:
             board = chess.Board()  # Standard starting position
+            starting_fen = board.fen()
         
         conversation_history = ""
         moves = []
@@ -510,54 +560,93 @@ class ChessBenchmark:
                 logger.info(f"Position FEN: {board.fen()}")
                 logger.info(f"Current evaluation: {current_eval/100:.2f}")
                 
+                # Check if there are legal moves
+                if not list(board.legal_moves):
+                    logger.warning("No legal moves for LLM - game should be over")
+                    break
+                
                 move = self.llm_make_move(board, conversation_history)
                 
+                # Check if we got a move
+                if not move:
+                    logger.warning("No move returned from LLM, ending game")
+                    break
+                
                 # Check if the move is valid before pushing
-                if move in [m.uci() for m in board.legal_moves]:
-                    logger.info(f"White (LLM) move: {move}")
-                    board.push(chess.Move.from_uci(move))
-                    moves.append(move)
-                    conversation_history += f"White: {move}\n"
-                    move_count += 1
-                    self.stats["total_moves"] += 1
-                    
-                    # Detect opening if we're early in the game
-                    if move_count <= 10 and not detected_opening:
-                        detected_opening = self.detect_opening(board)
-                        if detected_opening:
-                            logger.info(f"Opening detected: {detected_opening}")
-                            self.stats["opening_success"] += 1
-                    
-                    # Evaluate position after move
-                    current_eval = self.evaluate_position(board)
-                    eval_history.append(current_eval)
-                    
-                    # Detect blunders
-                    if self.detect_blunder(board, prev_eval, current_eval):
-                        llm_blunders += 1
-                        self.stats["blunders"] += 1
-                        logger.info(f"Blunder detected! Eval before: {prev_eval/100:.2f}, after: {current_eval/100:.2f}")
-                else:
-                    # This should rarely happen with our improved move validation
-                    logger.warning(f"Invalid move received from LLM: {move}")
+                try:
+                    chess_move = chess.Move.from_uci(move)
+                    if chess_move in board.legal_moves:
+                        logger.info(f"White (LLM) move: {move}")
+                        board.push(chess_move)
+                        moves.append(move)
+                        conversation_history += f"White: {move}\n"
+                        move_count += 1
+                        self.stats["total_moves"] += 1
+                        
+                        # Detect opening if we're early in the game
+                        if move_count <= 10 and not detected_opening:
+                            detected_opening = self.detect_opening(board)
+                            if detected_opening:
+                                logger.info(f"Opening detected: {detected_opening}")
+                                self.stats["opening_success"] += 1
+                        
+                        # Evaluate position after move
+                        current_eval = self.evaluate_position(board)
+                        eval_history.append(current_eval)
+                        
+                        # Detect blunders
+                        if self.detect_blunder(board, prev_eval, current_eval):
+                            llm_blunders += 1
+                            self.stats["blunders"] += 1
+                            logger.info(f"Blunder detected! Eval before: {prev_eval/100:.2f}, after: {current_eval/100:.2f}")
+                    else:
+                        # This should rarely happen with our improved move validation
+                        logger.warning(f"Invalid move received from LLM: {move}")
+                        self.stats["illegal_moves"] += 1
+                        # Try to use stockfish as fallback
+                        fallback_move = self.get_stockfish_move(board)
+                        if fallback_move:
+                            logger.info(f"Using stockfish fallback move: {fallback_move}")
+                            board.push(chess.Move.from_uci(fallback_move))
+                            moves.append(fallback_move)
+                            conversation_history += f"White (fallback): {fallback_move}\n"
+                            move_count += 1
+                        else:
+                            break
+                except Exception as e:
+                    logger.error(f"Error processing LLM move: {e}")
                     self.stats["illegal_moves"] += 1
                     break
             else:  # Stockfish's turn (Black)
+                # Check if there are legal moves
+                if not list(board.legal_moves):
+                    logger.warning("No legal moves for Stockfish - game should be over")
+                    break
+                    
                 move = self.get_stockfish_move(board)
                 
-                if move and move in [m.uci() for m in board.legal_moves]:
-                    logger.info(f"Black (Stockfish) move: {move}")
-                    board.push(chess.Move.from_uci(move))
-                    moves.append(move)
-                    conversation_history += f"Black: {move}\n"
-                    move_count += 1
-                    self.stats["total_moves"] += 1
-                    
-                    # Evaluate position after move
-                    current_eval = self.evaluate_position(board)
-                    eval_history.append(current_eval)
+                if move:
+                    try:
+                        chess_move = chess.Move.from_uci(move)
+                        if chess_move in board.legal_moves:
+                            logger.info(f"Black (Stockfish) move: {move}")
+                            board.push(chess_move)
+                            moves.append(move)
+                            conversation_history += f"Black: {move}\n"
+                            move_count += 1
+                            self.stats["total_moves"] += 1
+                            
+                            # Evaluate position after move
+                            current_eval = self.evaluate_position(board)
+                            eval_history.append(current_eval)
+                        else:
+                            logger.error(f"Invalid move from Stockfish: {move}")
+                            break
+                    except Exception as e:
+                        logger.error(f"Error processing Stockfish move: {e}")
+                        break
                 else:
-                    logger.error(f"Invalid move from Stockfish: {move}")
+                    logger.error("No move returned from Stockfish")
                     break
             
             # Safety check to prevent infinite games
@@ -566,7 +655,13 @@ class ChessBenchmark:
                 break
         
         # Game finished - determine result
-        result = board.result()
+        try:
+            result = board.result()
+        except Exception:
+            # Default to draw if we can't determine the result
+            logger.warning("Could not determine game result, defaulting to draw")
+            result = "1/2-1/2"
+        
         final_eval = self.evaluate_position(board)
         
         # Update statistics
@@ -593,7 +688,8 @@ class ChessBenchmark:
             "llm_blunders": llm_blunders,
             "final_eval": final_eval,
             "opening": detected_opening or opening or "Standard",
-            "elo_change": new_elo - (self.stats["elo_rating"] - (new_elo - self.stats["elo_rating"]))
+            "elo_change": new_elo - (self.stats["elo_rating"] - (new_elo - self.stats["elo_rating"])),
+            "starting_fen": starting_fen
         }
         
         # Save game data
@@ -607,331 +703,93 @@ class ChessBenchmark:
     
     def run_benchmark(self, num_games=5, openings=None):
         """
-        Run a benchmark of multiple games, optionally with specific openings.
+        Run a chess benchmark of multiple games.
         
         Args:
             num_games (int): Number of games to play
-            openings (list): List of opening names to use
+            openings (list): List of openings to use. If None, random openings will be selected.
             
         Returns:
-            dict: Comprehensive benchmark results
+            dict: Benchmark results
         """
-        logger.info(f"Starting benchmark with {num_games} games")
+        logger.info(f"Starting benchmark: {num_games} games with {self.llm_model}")
         
-        if openings:
-            # Validate the openings
-            valid_openings = [op for op in openings if op in OPENING_POSITIONS]
-            if len(valid_openings) < len(openings):
-                logger.warning(f"Some openings were not recognized: {set(openings) - set(valid_openings)}")
-            
-            # If we have fewer valid openings than games, cycle through them
-            if valid_openings:
-                selected_openings = [valid_openings[i % len(valid_openings)] for i in range(num_games)]
-            else:
-                selected_openings = [None] * num_games
-        else:
-            # Use random openings if none specified
-            all_openings = list(OPENING_POSITIONS.keys())
-            selected_openings = random.choices(all_openings, k=num_games)
-        
-        # Play the games
-        for game_num in range(1, num_games + 1):
-            opening = selected_openings[game_num - 1]
-            logger.info(f"Starting Game {game_num}/{num_games} with opening: {opening or 'Standard'}")
-            
-            game_data = self.play_game(opening=opening)
-            start_time = time.time()
-            game_data = self.play_game(opening=opening)
-            elapsed = time.time() - start_time
-            
-            # Log game result
-            logger.info(f"Game {game_num} result: {game_data['result']}")
-            logger.info(f"Game duration: {elapsed:.2f} seconds")
-            logger.info(f"Blunders: {game_data['llm_blunders']}")
-            
-            # Generate per-game report
-            move_pairs = len(game_data['moves']) // 2
-            logger.info(f"Game length: {move_pairs} {'moves' if move_pairs != 1 else 'move'}")
-            logger.info(f"Final evaluation: {game_data['final_eval']/100:.2f}")
-            logger.info(f"Elo change: {game_data['elo_change']}")
-            logger.info("-" * 40)
-        
-        # Generate final report and visualizations
-        report = self.generate_report()
-        viz_files = self.visualize_results()
-        
-        logger.info(f"Final Elo rating: {self.stats['elo_rating']}")
-        logger.info(f"Final Elo rating: {self.stats['elo_rating']}")
-        logger.info(f"Win rate: {report['win_rate']:.2f}%")
-        logger.info(f"Reports saved to: {self.results_dir}")
-        
-        return {
-            "report": report,
-            "visualization_files": viz_files,
-            "stats": self.stats
-        }
-    
-    def compare_models(self, models, games_per_model=3):
-
-    # """
-    # Compare multiple LLM models on the same chess benchmarks.
-    
-    # Args:
-    #     models (list): List of model names to compare
-    #     games_per_model (int): Number of games to play per model
-        
-    # Returns:
-    
-    # """
-        logger.info(f"Starting model comparison: {models}")
-        original_model = self.llm_model
-        comparison_results = {}
-        original_model = self.llm_model
-        
-        selected_openings = random.choices(all_openings, k=games_per_model)
-        all_openings = list(OPENING_POSITIONS.keys())
-        selected_openings = random.choices(all_openings, k=games_per_model)
-        for model in models:
-        # Run benchmarks for each model
-            for model in models:
-                logger.info(f"Testing model: {model}")
-                
-                # Reset statistics and switch model
-                self.stats = {
-                    "games_played": 0,
-                    "llm_wins": 0,
-                    "stockfish_wins": 0,
-                    "draws": 0,
-                    "illegal_moves": 0,
-                    "blunders": 0,
-                    "avg_move_time": 0,
-                    "opening_success": 0,
-                    "game_history": [],
-                    "avg_game_length": 0,
-                    "total_moves": 0,
-                    "eval_history": [],
-                    "elo_rating": 1500,  # Starting Elo rating
-                }
-                self.llm_model = model
-                # Update the LLM to the current model being tested
-                self.llm_model = model
-                temperature=self.temperature,
-                model_name=model,
-                api_key=OPENAI_API_KEY
-                model_results_dir = f"{self.results_dir}/{model.replace('-', '_')}"
-                # Create a model-specific results directory
-                original_results_dir = self.results_dir
-                self.results_dir = model_results_dir
-                original_results_dir = self.results_dir
-                self.results_dir = model_results_dir
-                
-                logger.info(f"Starting Game {game_num}/{games_per_model} with opening: {opening or 'Standard'}")
-                for game_num, opening in enumerate(selected_openings, 1):
-                    logger.info(f"Starting Game {game_num}/{games_per_model} with opening: {opening or 'Standard'}")
-                    
-                    start_time = time.time()
-                    game_data = self.play_game(opening=opening)
-                    elapsed = time.time() - start_time
-                    
-                    logger.info(f"Game {game_num} result: {game_data['result']}")
-                    logger.info(f"Game duration: {elapsed:.2f} seconds")
-                model_report = self.generate_report()
-                model_visualizations = self.visualize_results()
-                model_report = self.generate_report()
-                model_visualizations = self.visualize_results()
-                
-                # Store the results for this model
-                comparison_results[model] = {
-                    "stats": self.stats.copy(),  # Make a copy to preserve the stats
-                    "visualization_files": model_visualizations,
-                    "stats": self.stats.copy()  # Make a copy to preserve the stats
-                }
-                
-                logger.info(f"Completed benchmark for model: {model}")
-                logger.info(f"Final Elo rating: {self.stats['elo_rating']}")
-                logger.info(f"Win rate: {model_report['win_rate']:.2f}%")
-                logger.info("-" * 50)
-            self.llm_model = original_model
-            # Restore original model and results directory
-            self.llm_model = original_model
-            self.chat = ChatOpenAI(
-                model_name=original_model,
-                temperature=self.temperature,
-                api_key=OPENAI_API_KEY
-            )
-            self.results_dir = original_results_dir
-            self._generate_comparison_visualizations(comparison_results)
-            # Generate comparative visualization
-            self._generate_comparison_visualizations(comparison_results)
-            
-            return comparison_results
-
-def compare_models(self, models, games_per_model=3):
-    """
-    Compare multiple LLM models on the same chess benchmarks.
-    
-    Args:
-        models (list): List of model names to compare
-        games_per_model (int): Number of games to play per model
-        
-    Returns:
-        dict: Comparison results for all models
-    """
-    logger.info(f"Starting model comparison: {models}")
-    original_model = self.llm_model
-    comparison_results = {}
-    
-    # Get all openings
-    all_openings = list(OPENING_POSITIONS.keys())
-    selected_openings = random.choices(all_openings, k=games_per_model)
-    
-    # Run benchmarks for each model
-    for model in models:
-        logger.info(f"Testing model: {model}")
-        
-        # Reset statistics and switch model
-        self.stats = {
-            "games_played": 0,
+        # Initialize results
+        results = {
+            "games": [],
             "llm_wins": 0,
             "stockfish_wins": 0,
             "draws": 0,
-            "illegal_moves": 0,
-            "blunders": 0,
-            "avg_move_time": 0,
-            "opening_success": 0,
-            "game_history": [],
-            "avg_game_length": 0,
-            "total_moves": 0,
-            "eval_history": [],
-            "elo_rating": 1500,  # Starting Elo rating
+            "avg_blunders": 0,
+            "avg_eval": 0,
+            "elo_rating": self.stats["elo_rating"],
+            "initial_elo": self.stats["elo_rating"]
         }
         
-        # Update the LLM to the current model being tested
-        self.llm_model = model
-        self.chat = ChatOpenAI(
-            model_name=model,
-            temperature=self.temperature,
-            api_key=OPENAI_API_KEY
-        )
+        # Create a folder for this benchmark run
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        benchmark_dir = f"{self.results_dir}/benchmark_{timestamp}"
+        os.makedirs(benchmark_dir, exist_ok=True)
+        self.results_dir = benchmark_dir  # Update the results directory for this run
         
-        # Create a model-specific results directory
-        original_results_dir = self.results_dir
-        model_results_dir = f"{self.results_dir}/{model.replace('-', '_')}"
-        os.makedirs(model_results_dir, exist_ok=True)
-        self.results_dir = model_results_dir
+        # If openings is specified, use them; otherwise randomly select from available openings
+        opening_list = openings if openings else list(OPENING_POSITIONS.keys())
+        selected_openings = random.choices(opening_list, k=num_games) if len(opening_list) > 0 else ["Standard"] * num_games
         
-        # Run games with the selected openings
-        for game_num, opening in enumerate(selected_openings, 1):
-            logger.info(f"Starting Game {game_num}/{games_per_model} with opening: {opening or 'Standard'}")
+        total_blunders = 0
+        total_eval = 0
+        
+        # Play the specified number of games
+        for game_idx in range(num_games):
+            opening = selected_openings[game_idx]
+            logger.info(f"Game {game_idx+1}/{num_games} with opening: {opening}")
             
-            start_time = time.time()
-            game_data = self.play_game(opening=opening)
-            elapsed = time.time() - start_time
-            
-            logger.info(f"Game {game_num} result: {game_data['result']}")
-            logger.info(f"Game duration: {elapsed:.2f} seconds")
+            try:
+                # Play the game
+                game_data = self.play_game(opening=opening)
+                
+                # Record game results
+                results["games"].append(game_data)
+                
+                if game_data["result"] == "1-0":
+                    results["llm_wins"] += 1
+                elif game_data["result"] == "0-1":
+                    results["stockfish_wins"] += 1
+                else:
+                    results["draws"] += 1
+                    
+                total_blunders += game_data["llm_blunders"]
+                total_eval += game_data["final_eval"]
+                
+                # Save individual game results
+                game_json = f"{self.results_dir}/game_{game_idx+1}_data.json"
+                with open(game_json, "w") as f:
+                    json.dump(game_data, f, indent=2)
+                    
+            except Exception as e:
+                logger.error(f"Error playing game {game_idx+1}: {e}")
+                # Continue with the next game
         
-        # Generate report and visualizations for this model
-        model_report = self.generate_report()
-        model_visualizations = self.visualize_results()
+        # Calculate averages
+        if num_games > 0:
+            results["avg_blunders"] = total_blunders / num_games
+            results["avg_eval"] = total_eval / num_games
         
-        # Store the results for this model
-        comparison_results[model] = {
-            "report": model_report,
-            "visualization_files": model_visualizations,
-            "stats": self.stats.copy()  # Make a copy to preserve the stats
-        }
+        # Finalize Elo rating after all games
+        results["elo_rating"] = self.stats["elo_rating"]
+        results["elo_change"] = results["elo_rating"] - results["initial_elo"]
         
-        logger.info(f"Completed benchmark for model: {model}")
-        logger.info(f"Final Elo rating: {self.stats['elo_rating']}")
-        logger.info(f"Win rate: {model_report['win_rate']:.2f}%")
-        logger.info("-" * 50)
+        # Generate a report and visualizations
+        report = self.generate_report()
+        results["report"] = report
         
-        # Restore original results directory
-        self.results_dir = original_results_dir
-    
-    # Restore original model
-    self.llm_model = original_model
-    self.chat = ChatOpenAI(
-        model_name=original_model,
-        temperature=self.temperature,
-        api_key=OPENAI_API_KEY
-    )
-    
-    # Generate comparative visualization
-    self._generate_comparison_visualizations(comparison_results)
-    
-    return comparison_results
-
-
-# Main execution script
-if __name__ == "__main__":
-    # Example usage
-    print("Chess LLM Benchmark Tool")
-    print("========================")
-    
-    # Create benchmark with default settings
-    benchmark = ChessBenchmark(
-        llm_model="gpt-4",  # Or any other model you want to test
-        temperature=0.0,    # Set to 0 for most deterministic play
-        stockfish_depth=15  # Adjust based on your computing power
-    )
-    
-    # Choose benchmark mode
-    print("\nSelect benchmark mode:")
-    print("1. Single model benchmark")
-    print("2. Compare multiple models")
-    choice = input("Enter choice (1-2): ")
-    
-    if choice == "1":
-        # Run single model benchmark
-        num_games = int(input("\nNumber of games to play: ") or "5")
-        use_openings = input("Use specific openings? (y/n): ").lower() == 'y'
+        visualization_files = self.visualize_results()
+        results["visualizations"] = visualization_files
         
-        if use_openings:
-            print("\nAvailable openings:")
-            for i, opening in enumerate(OPENING_POSITIONS.keys(), 1):
-                print(f"{i}. {opening}")
-            opening_indices = input("Enter opening numbers (comma-separated, or 'all'): ")
-            
-            if opening_indices.lower() == 'all':
-                selected_openings = list(OPENING_POSITIONS.keys())
-            else:
-                indices = [int(idx.strip()) for idx in opening_indices.split(',')]
-                selected_openings = [list(OPENING_POSITIONS.keys())[i-1] for i in indices if 0 < i <= len(OPENING_POSITIONS)]
-        else:
-            selected_openings = None
+        # Save the final benchmark results
+        benchmark_results_file = f"{self.results_dir}/benchmark_results.json"
+        with open(benchmark_results_file, "w") as f:
+            json.dump(results, f, indent=2)
         
-        print(f"\nRunning benchmark with {benchmark.llm_model} for {num_games} games...")
-        results = benchmark.run_benchmark(num_games=num_games, openings=selected_openings)
-        
-        print("\nResults:")
-        print(f"Win rate: {results['report']['win_rate']:.2f}%")
-        print(f"Draw rate: {results['report']['draw_rate']:.2f}%")
-        print(f"Loss rate: {100 - results['report']['win_rate'] - results['report']['draw_rate']:.2f}%")
-        print(f"Final Elo: {results['report']['elo_rating']}")
-        print(f"Blunder rate: {results['report']['blunder_rate']:.2f}%")
-        print(f"\nResults and visualizations saved to: {benchmark.results_dir}")
-        
-    elif choice == "2":
-        # Run model comparison
-        models_input = input("\nEnter model names (comma-separated, e.g., gpt-4,gpt-3.5-turbo): ")
-        models = [model.strip() for model in models_input.split(',')]
-        
-        games_per_model = int(input("Number of games per model: ") or "3")
-        
-        print(f"\nComparing models: {', '.join(models)}")
-        comparison_results = benchmark.compare_models(models, games_per_model=games_per_model)
-        
-        print("\nComparison complete. Results summary:")
-        for model in models:
-            results = comparison_results[model]["report"]
-            print(f"\n{model}:")
-            print(f"  Win rate: {results['win_rate']:.2f}%")
-            print(f"  Elo rating: {results['elo_rating']}")
-            print(f"  Blunder rate: {results['blunder_rate']:.2f}%")
-        
-        print(f"\nComparison results and visualizations saved to: {benchmark.results_dir}")
-    
-    else:
-        print("Invalid choice.")
+        logger.info(f"Benchmark completed. Results saved to {benchmark_results_file}")
+        return results
