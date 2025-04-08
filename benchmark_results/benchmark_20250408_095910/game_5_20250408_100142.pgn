@@ -1,0 +1,11 @@
+[Event "LLM Chess Benchmark"]
+[Site "LLM vs Stockfish"]
+[Date "2025.04.08"]
+[Round "5"]
+[White "LLM (gpt-4)"]
+[Black "Stockfish (Depth 15)"]
+[Result "0-1"]
+[LLMBlunders "12"]
+[FinalEval "-10000"]
+[Opening "Sicilian Defense"]
+

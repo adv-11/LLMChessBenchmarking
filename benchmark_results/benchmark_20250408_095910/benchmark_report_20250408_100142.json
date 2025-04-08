@@ -1,0 +1,14 @@
+{
+  "model": "gpt-4",
+  "games_played": 5,
+  "win_rate": 0.0,
+  "draw_rate": 0.0,
+  "avg_game_length": 15.5,
+  "avg_move_time": 1.0691978243270779,
+  "blunder_rate": 65.80645161290323,
+  "illegal_move_rate": 0.0,
+  "opening_success_rate": 0.0,
+  "position_eval_trend": -10030.2,
+  "elo_rating": 1495,
+  "timestamp": "2025-04-08 10:01:42"
+}
