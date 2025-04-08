@@ -90,8 +90,7 @@ class ChessBenchmark:
     
     def llm_make_move(self, board, conversation_history, retry_count=0):
         """
-        Generate the next move for White using LLM, providing the conversation history 
-        and board state as context.
+        Generate the next move for White using LLM with improved error handling.
         
         Args:
             board (chess.Board): Current chess board
@@ -116,7 +115,7 @@ class ChessBenchmark:
             logger.warning("No legal moves available - game should be over")
             return None
         
-        # Create an improved prompt with more context
+        # Create an improved prompt with more context and clearer instructions
         prompt = (
             f"You are a chess grandmaster playing as White. Your objective is to win. "
             f"\nCurrent board state (White = uppercase, Black = lowercase):\n{visual_board}\n"
@@ -124,7 +123,7 @@ class ChessBenchmark:
             f"Move history:\n{conversation_history}\n"
             f"Legal moves in UCI format: {', '.join(legal_moves)}\n\n"
             "Analyze the position carefully and provide the best move for White in UCI format (e.g., e2e4). "
-            "Only respond with the move in UCI format, without any additional text or explanation."
+            "Respond ONLY with a single valid UCI move from the provided list, with no additional text."
         )
         
         # Use LangChain's ChatOpenAI to generate a response
@@ -142,8 +141,14 @@ class ChessBenchmark:
             # Invoke the chat model to get a response
             response = self.chat.invoke(messages)
             
-            # Extract the move from the response content
-            move = response.content.strip()
+            # Extract the move and clean it
+            move = response.content.strip().lower()
+            # Remove any non-UCI elements (handles cases where LLM adds extra text)
+            for legal_move in legal_moves:
+                if legal_move in move:
+                    move = legal_move
+                    break
+                    
             move_time = time.time() - start_time
             
             # Update the average move time
@@ -154,9 +159,9 @@ class ChessBenchmark:
             else:
                 self.stats["avg_move_time"] = move_time
                 
-            # Validate the move
+            # Validate the move more strictly
             if move not in legal_moves:
-                logger.warning(f"Invalid move received: {move}. Legal moves: {legal_moves}")
+                logger.warning(f"Invalid move received: '{move}'. Legal moves: {legal_moves}")
                 return self.llm_make_move(board, conversation_history, retry_count + 1)
                 
             return move
@@ -226,9 +231,10 @@ class ChessBenchmark:
     
     def detect_blunder(self, board, prev_eval, current_eval, threshold=150):
         """
-        Detect if a move was a blunder based on evaluation delta.
+        Detect if a move was a blunder based on evaluation delta with improved logic.
         
         Args:
+            board (chess.Board): Current chess board
             prev_eval (float): Previous position evaluation
             current_eval (float): Current position evaluation
             threshold (int): Centipawn threshold for blunder detection
@@ -236,11 +242,15 @@ class ChessBenchmark:
         Returns:
             bool: True if the move was a blunder
         """
+        # Handle extremely high evaluation scores (checkmate scenarios)
+        if abs(prev_eval) > 9000 or abs(current_eval) > 9000:
+            return False  # Skip blunder detection for winning/losing positions
+        
         # For White's move: a significant decrease in evaluation is a blunder
         # For Black's move: a significant increase in evaluation is a blunder
-        if board.turn:  # White's turn (pre-move)
+        if board.turn:  # White just moved (it's now Black's turn)
             return (prev_eval - current_eval) >= threshold
-        else:  # Black's turn (pre-move)
+        else:  # Black just moved (it's now White's turn)
             return (current_eval - prev_eval) >= threshold
             
     def detect_opening(self, board):
@@ -311,7 +321,7 @@ class ChessBenchmark:
     
     def save_game_to_pgn(self, board, game_data):
         """
-        Save a game to PGN format.
+        Save a game to PGN format with improved error handling for illegal moves.
         
         Args:
             board (chess.Board): Final board state
@@ -338,39 +348,54 @@ class ChessBenchmark:
             game.headers["FinalEval"] = str(game_data["final_eval"])
             game.headers["Opening"] = game_data["opening"] if game_data["opening"] else "Unknown"
             
-            # Set up game moves - we'll validate each move before adding
+            # Reconstruct the game move by move from scratch
             node = game
             
-            # Create a fresh board to validate moves
-            setup_board = chess.Board()
+            # Use a fresh board to validate moves
+            temp_board = chess.Board()
             if game_data.get("starting_fen"):
-                setup_board.set_fen(game_data["starting_fen"])
+                temp_board.set_fen(game_data["starting_fen"])
             
-            # Add each move one by one, validating them
-            for move_uci in game_data["moves"]:
+            # Safely process each move
+            for move_idx, move_uci in enumerate(game_data["moves"]):
                 try:
                     move = chess.Move.from_uci(move_uci)
                     
-                    # Check if the move is legal in the current position
-                    if move in setup_board.legal_moves:
-                        node = node.add_variation(move)
-                        setup_board.push(move)
-                    else:
-                        logger.warning(f"Illegal move {move_uci} detected in PGN creation, skipping")
+                    # Make sure the move is legal
+                    if move not in temp_board.legal_moves:
+                        logger.warning(f"Skipping illegal move {move_uci} at position {move_idx}")
+                        continue
+                    
+                    # Add the move and update board
+                    node = node.add_variation(move)
+                    temp_board.push(move)
+                    
                 except Exception as e:
-                    logger.error(f"Error processing move {move_uci}: {e}")
-                    # Skip invalid moves
-                    continue
+                    logger.error(f"Error processing move {move_uci} at index {move_idx}: {e}")
+                    # Skip invalid moves but continue processing
             
             # Save to file
             filename = f"{self.results_dir}/game_{self.stats['games_played']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pgn"
+            
+            # Write the PGN data to file
             with open(filename, "w") as f:
-                f.write(str(game))
-        
+                exporter = chess.pgn.FileExporter(f)
+                game.accept(exporter)
+            
+            # Create a supplementary text file with all moves for reference
+            moves_filename = f"{self.results_dir}/game_{self.stats['games_played']}_moves.txt"
+            with open(moves_filename, "w") as f:
+                f.write(f"Starting FEN: {game_data.get('starting_fen', 'Standard')}\n")
+                f.write(f"Result: {game_data['result']}\n")
+                f.write("Moves (UCI format):\n")
+                for i, move in enumerate(game_data["moves"]):
+                    f.write(f"{i+1}. {move}\n")
+            
             return filename
+            
         except Exception as e:
             logger.error(f"Error saving game to PGN: {e}")
-            # Create a simplified PGN file as fallback
+            # Create a simplified representation as fallback
             fallback_filename = f"{self.results_dir}/game_{self.stats['games_played']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_fallback.txt"
             with open(fallback_filename, "w") as f:
                 f.write(f"Game data: {json.dumps(game_data, indent=2)}")
@@ -793,3 +818,37 @@ class ChessBenchmark:
         
         logger.info(f"Benchmark completed. Results saved to {benchmark_results_file}")
         return results
+
+
+if __name__ == "__main__":
+    # Parse command line arguments
+    import argparse
+    parser = argparse.ArgumentParser(description='Run LLM Chess Benchmark')
+    parser.add_argument('--model', type=str, default="gpt-4", help='LLM model to use')
+    parser.add_argument('--games', type=int, default=5, help='Number of games to play')
+    parser.add_argument('--temperature', type=float, default=0.0, help='Temperature parameter for LLM')
+    parser.add_argument('--depth', type=int, default=15, help='Stockfish depth')
+    parser.add_argument('--openings', type=str, nargs='+', help='List of openings to use')
+    args = parser.parse_args()
+    
+    # Select openings to use
+    selected_openings = args.openings if args.openings else None
+    
+    # Configure and run the benchmark
+    benchmark = ChessBenchmark(
+        llm_model=args.model,
+        temperature=args.temperature,
+        stockfish_depth=args.depth
+    )
+    
+    # Set number of games
+    num_games = args.games
+    
+    # Run the benchmark
+    try:
+        results = benchmark.run_benchmark(num_games=num_games, openings=selected_openings)
+        print(f"Benchmark completed. Final Elo rating: {results['elo_rating']}")
+    except KeyboardInterrupt:
+        print("Benchmark interrupted by user.")
+    except Exception as e:
+        print(f"Benchmark failed with error: {e}")
