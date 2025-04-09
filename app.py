@@ -443,3 +443,403 @@ class ChessBenchmark:
             return random.choice(legal_moves).uci() if legal_moves else None
 
 # --- End of Part 2 ---
+
+
+# Part 3: Analysis, Evaluation, Saving, and Utility Methods
+
+class ChessBenchmark:
+    # ... (previous code from Part 1 and 2) ...
+
+    def evaluate_position(self, board: chess.Board, depth: Optional[int] = None) -> Optional[int]:
+        """
+        Get Stockfish's evaluation of the current position in centipawns.
+
+        Args:
+            board: The current chess.Board object.
+            depth: The search depth for evaluation. Uses self.stockfish_eval_depth if None.
+
+        Returns:
+            Evaluation score in centipawns (positive is good for White),
+            or None if evaluation fails.
+        """
+        if not self.stockfish_available:
+            logger.warning("Stockfish not available, cannot evaluate position.")
+            return None # Return None to indicate failure
+
+        eval_depth = depth if depth is not None else self.stockfish_eval_depth
+
+        try:
+            with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as stockfish:
+                # Use a shorter timeout for evaluation compared to playing moves
+                # Limit by depth primarily
+                info = stockfish.analyse(board, chess.engine.Limit(depth=eval_depth, time=max(0.5, self.stockfish_timeout / 2)))
+
+                # Score can be PovScore or Cp or Mate object
+                score = info.get("score")
+                if score is None:
+                    logger.warning(f"Stockfish analysis did not return a score for FEN: {board.fen()}")
+                    return None # Indicate failure
+
+                # Get score relative to the side whose turn it is
+                relative_score = score.white() if board.turn == chess.WHITE else score.black()
+
+                # Convert to centipawns from White's perspective
+                # Handle Mate scores appropriately
+                final_score = relative_score.score(mate_score=10000) # Assign high value for mate
+
+                if final_score is None:
+                     # If score is Mate('-0'), score() might return None. Checkmate is maximally bad.
+                     if score.is_mate() and score.mate() < 0:
+                          final_score = -10000
+                     # If score is Mate('+0'), score() might return None. Checkmate is maximally good.
+                     elif score.is_mate() and score.mate() > 0:
+                          final_score = 10000
+                     else:
+                          logger.warning(f"Could not convert score '{score}' to centipawns.")
+                          return 0 # Default to 0 if conversion fails unexpectedly
+
+                # Ensure score is relative to White
+                if board.turn == chess.BLACK:
+                     final_score = -final_score # Invert score if it's Black's turn
+
+                return final_score
+
+        except chess.engine.EngineTerminatedError:
+             logger.error("Stockfish engine terminated unexpectedly during evaluation.")
+             self.stockfish_available = False
+             return None
+        except Exception as e:
+            logger.error(f"Error during position evaluation for FEN {board.fen()}: {e}", exc_info=True)
+            return None # Indicate failure
+
+    def detect_blunder(self, board_after_move: chess.Board, prev_eval: Optional[int], current_eval: Optional[int]) -> bool:
+        """
+        Detect if the last move played was a blunder based on evaluation change.
+        Handles perspective correctly (White moves, eval drops; Black moves, eval increases relative to White).
+
+        Args:
+            board_after_move: The board state *after* the move was made.
+            prev_eval: Evaluation (centipawns) *before* the move.
+            current_eval: Evaluation (centipawns) *after* the move.
+
+        Returns:
+            True if the move qualifies as a blunder, False otherwise.
+        """
+        if prev_eval is None or current_eval is None:
+            return False # Cannot detect blunder without evaluations
+
+        # Ignore detection if near mate scores, as fluctuations are less meaningful
+        if abs(prev_eval) > 9000 or abs(current_eval) > 9000:
+            return False
+
+        eval_delta = current_eval - prev_eval
+
+        # Check whose turn it is *now*. If it's Black's turn, White just moved.
+        if board_after_move.turn == chess.BLACK:
+            # White's move is a blunder if evaluation decreased significantly (delta is negative)
+            return eval_delta <= -self.blunder_threshold
+        # If it's White's turn, Black just moved.
+        else:
+            # Black's move is a blunder if evaluation increased significantly for White (delta is positive)
+            # Note: This function is primarily used to detect LLM (White's) blunders in the current setup.
+            # Adjust if needed for analysing Black's blunders.
+             # return eval_delta >= self.blunder_threshold # If checking Black's blunder
+             return False # In current setup, only checking White's blunders
+
+    def update_elo(self, llm_current_elo: int, opponent_elo: int, game_result: float) -> int:
+        """
+        Calculate the new Elo rating based on the game result.
+
+        Args:
+            llm_current_elo: The LLM's Elo rating before the game.
+            opponent_elo: The opponent's Elo rating (e.g., Stockfish estimated Elo).
+            game_result: Game result from LLM's perspective (1.0=win, 0.5=draw, 0.0=loss).
+
+        Returns:
+            The new Elo rating after the game.
+        """
+        expected_score = 1 / (1 + 10 ** ((opponent_elo - llm_current_elo) / 400))
+        new_rating = llm_current_elo + self.elo_k_factor * (game_result - expected_score)
+        return int(round(new_rating))
+
+    def save_game_to_pgn(self, game_data: Dict[str, Any], game_index: int) -> Optional[str]:
+        """
+        Save a completed game to PGN format in the current benchmark run directory.
+
+        Args:
+            game_data: Dictionary containing game details (result, moves, starting FEN, etc.).
+            game_index: The index number of the game within the current benchmark run.
+
+        Returns:
+            Path to the saved PGN file, or None on failure.
+        """
+        if not self.current_run_dir:
+             logger.error("Current run directory not set. Cannot save PGN.")
+             return None
+
+        try:
+            game = chess.pgn.Game()
+
+            # --- Standard PGN Headers ---
+            game.headers["Event"] = f"LLM Chess Benchmark ({self.llm_model})"
+            game.headers["Site"] = f"Local Machine (Stockfish {self.stockfish_depth})"
+            game.headers["Date"] = datetime.now().strftime("%Y.%m.%d")
+            game.headers["Round"] = str(game_index)
+            game.headers["White"] = f"LLM ({self.llm_model})"
+            game.headers["Black"] = f"Stockfish (Depth {self.stockfish_depth})" # Or skill level if used
+            game.headers["Result"] = game_data["result"]
+            game.headers["WhiteElo"] = str(game_data.get("elo_before", self.stats["elo_rating"])) # Use Elo before this game
+            game.headers["BlackElo"] = str(game_data.get("opponent_elo", "N/A")) # Assumed Stockfish Elo
+            # Optional: Add Elo change if available
+            if "elo_after" in game_data and "elo_before" in game_data:
+                 white_elo_diff = game_data['elo_after'] - game_data['elo_before']
+                 game.headers["WhiteRatingDiff"] = f"{white_elo_diff:+}"
+                 # Assume Black Elo is stable or calculate if tracking opponent Elo
+                 game.headers["BlackRatingDiff"] = "0"
+
+
+            # --- Setup Specific Position (if not standard) ---
+            starting_fen = game_data.get("starting_fen", chess.STARTING_FEN)
+            if starting_fen != chess.STARTING_FEN:
+                game.headers["SetUp"] = "1"
+                game.headers["FEN"] = starting_fen
+
+            # --- Custom Headers (Optional) ---
+            game.headers["LLM_Blunders"] = str(game_data.get("llm_blunders", 0))
+            game.headers["FinalEval_CP"] = str(game_data.get("final_eval")) # Centipawns
+            game.headers["Opening_Detected"] = game_data.get("opening", "Unknown")
+
+            # --- Reconstruct Game Moves ---
+            # Use a temporary board starting from the correct FEN
+            temp_board = chess.Board(starting_fen)
+            node = game # Start at the root node
+
+            for move_uci in game_data.get("moves", []):
+                try:
+                    move = chess.Move.from_uci(move_uci)
+                    # Important: Ensure the move was actually legal in that position
+                    if move in temp_board.legal_moves:
+                        node = node.add_variation(move)
+                        temp_board.push(move)
+                    else:
+                        # This indicates a potential issue during game play recording or an illegal fallback move was saved.
+                        logger.warning(f"Skipping illegal move '{move_uci}' during PGN reconstruction for game {game_index}. FEN: {temp_board.fen()}")
+                        # Optionally add a comment to the PGN node about the skipped move
+                        # node.comment = f"Illegal move {move_uci} skipped here."
+                        # Decide whether to stop reconstruction or continue
+                        continue # Continue with next recorded move
+                except ValueError:
+                    logger.warning(f"Invalid UCI move string '{move_uci}' encountered during PGN reconstruction for game {game_index}.")
+                    continue
+
+            # Add final board state comment (optional)
+            game.end().comment = f"Final board FEN: {temp_board.fen()}"
+
+            # --- Save to File ---
+            # Use the specific benchmark run directory
+            filename = os.path.join(self.current_run_dir, f"game_{game_index}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pgn")
+            with open(filename, "w", encoding="utf-8") as f:
+                exporter = chess.pgn.FileExporter(f)
+                game.accept(exporter)
+
+            logger.debug(f"Game {game_index} saved to {filename}")
+            return filename
+
+        except Exception as e:
+            logger.error(f"Error saving game {game_index} to PGN: {e}", exc_info=True)
+            # Fallback: Save raw game data as JSON
+            fallback_filename = os.path.join(self.current_run_dir, f"game_{game_index}_data_fallback.json")
+            try:
+                 with open(fallback_filename, "w") as f:
+                     json.dump(game_data, f, indent=2)
+                 return fallback_filename
+            except Exception as dump_e:
+                 logger.error(f"Error saving fallback JSON for game {game_index}: {dump_e}")
+                 return None
+
+    def generate_annotated_positions(self, position_set_name: str, num_positions: int = 10, depth: int = 20, output_file: Optional[str] = None) -> List[Dict]:
+        """
+        Generates training/analysis data by analyzing positions with Stockfish.
+        (Requirement 4)
+
+        Args:
+            position_set_name: Name of the key from ALL_POSITION_SETS (e.g., "SIMPLE_ENDGAMES").
+            num_positions: Maximum number of positions to annotate from the set.
+            depth: Stockfish analysis depth for quality annotation.
+            output_file: Optional path to save the annotations as a JSON file.
+
+        Returns:
+            A list of dictionaries, each containing annotated position data,
+            or an empty list if Stockfish is unavailable or errors occur.
+        """
+        if not self.stockfish_available:
+            logger.error("Stockfish not available. Cannot generate annotated positions.")
+            return []
+
+        if position_set_name not in ALL_POSITION_SETS:
+             logger.error(f"Position set '{position_set_name}' not found in ALL_POSITION_SETS.")
+             return []
+
+        positions_to_annotate = list(ALL_POSITION_SETS[position_set_name].items())
+        random.shuffle(positions_to_annotate) # Process a random subset if needed
+        positions_to_annotate = positions_to_annotate[:num_positions]
+
+        annotated_data = []
+        logger.info(f"Starting annotation generation for {len(positions_to_annotate)} positions from '{position_set_name}' with depth {depth}.")
+
+        try:
+            with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
+                for name, fen in positions_to_annotate:
+                    try:
+                        board = chess.Board(fen)
+                        logger.debug(f"Annotating position: {name} ({fen})")
+
+                        # Get deep analysis
+                        info = engine.analyse(board, chess.engine.Limit(depth=depth))
+
+                        score_obj = info.get("score")
+                        if score_obj:
+                             eval_score = score_obj.white().score(mate_score=10000)
+                             if board.turn == chess.BLACK: eval_score = -eval_score # Ensure relative to White
+                        else:
+                             eval_score = None
+
+                        pv_moves = info.get("pv", [])
+                        best_move = pv_moves[0].uci() if pv_moves else None
+
+                        annotation = {
+                            "name": name,
+                            "fen": fen,
+                            "best_move_uci": best_move,
+                            "evaluation_cp": eval_score,
+                            "principal_variation_uci": [move.uci() for move in pv_moves],
+                            "depth": depth
+                        }
+                        annotated_data.append(annotation)
+
+                    except Exception as pos_e:
+                        logger.error(f"Error annotating position {name} ({fen}): {pos_e}", exc_info=True)
+                        continue # Skip to next position
+
+        except chess.engine.EngineTerminatedError:
+             logger.error("Stockfish engine terminated unexpectedly during annotation.")
+             self.stockfish_available = False
+             return []
+        except Exception as e:
+            logger.error(f"General error during annotation generation: {e}", exc_info=True)
+            return annotated_data # Return partial data if some succeeded
+
+
+        # Save to file if requested
+        if output_file:
+            try:
+                # Ensure directory exists if path includes folders
+                output_dir = os.path.dirname(output_file)
+                if output_dir:
+                     os.makedirs(output_dir, exist_ok=True)
+
+                with open(output_file, "w", encoding="utf-8") as f:
+                    json.dump(annotated_data, f, indent=2)
+                logger.info(f"Saved {len(annotated_data)} annotated positions to {output_file}")
+            except Exception as save_e:
+                logger.error(f"Error saving annotated positions to {output_file}: {save_e}")
+
+        return annotated_data
+
+    def analyze_losing_positions(self, blunder_threshold: Optional[int] = None) -> int:
+        """
+        Analyzes completed games to find positions where the LLM blundered significantly.
+        Populates self.stats["blunder_positions"]. (Requirement 5)
+
+        Args:
+            blunder_threshold: Optional override for the blunder centipawn threshold.
+
+        Returns:
+            The number of new blunder positions identified and added.
+        """
+        if not self.stats["game_history"]:
+            logger.info("No game history available to analyze for blunders.")
+            return 0
+
+        threshold = blunder_threshold if blunder_threshold is not None else self.blunder_threshold
+        new_blunders_found = 0
+        processed_fens = {bp['fen'] for bp in self.stats["blunder_positions"]} # Avoid duplicates
+
+        logger.info(f"Analyzing game history for blunders (threshold: {threshold}cp)...")
+
+        for game_idx, game_data in enumerate(self.stats["game_history"]):
+            moves = game_data.get("moves", [])
+            eval_history = game_data.get("eval_history", [])
+            starting_fen = game_data.get("starting_fen", chess.STARTING_FEN)
+
+            # Need at least one move and two evaluations to detect a blunder
+            if len(moves) < 1 or len(eval_history) < 2:
+                continue
+
+            try:
+                board = chess.Board(starting_fen)
+                # Iterate through LLM (White's) moves
+                # White moves are at indices 0, 2, 4, ...
+                # Eval history has initial eval at index 0, eval after move i is at index i+1
+                for move_idx in range(0, len(moves), 2): # Step by 2 for White's moves
+                    # Ensure evaluations exist for before and after this move
+                    # Eval before move `move_idx` is `eval_history[move_idx]`
+                    # Eval after move `move_idx` is `eval_history[move_idx + 1]`
+                    if move_idx + 1 >= len(eval_history):
+                         continue # Not enough evaluation data for this move
+
+                    prev_eval = eval_history[move_idx]
+                    current_eval = eval_history[move_idx + 1]
+
+                    if prev_eval is None or current_eval is None:
+                        board.push(chess.Move.from_uci(moves[move_idx]))
+                        # Also push Black's response if it exists
+                        if move_idx + 1 < len(moves):
+                            board.push(chess.Move.from_uci(moves[move_idx + 1]))
+                        continue # Skip if evals are missing
+
+                    # Check if White's move was a blunder
+                    eval_delta = current_eval - prev_eval
+                    if eval_delta <= -threshold:
+                        # Blunder detected! Reconstruct board *before* the blunder move
+                        blunder_board = chess.Board(starting_fen)
+                        for i in range(move_idx):
+                            blunder_board.push(chess.Move.from_uci(moves[i]))
+
+                        blunder_fen = blunder_board.fen()
+                        blunder_move_uci = moves[move_idx]
+
+                        # Avoid adding duplicate positions from different games/runs
+                        if blunder_fen not in processed_fens:
+                             blunder_info = {
+                                 "game_index": game_idx + 1, # 1-based index
+                                 "move_number": board.fullmove_number, # Move number when blunder occurred
+                                 "fen": blunder_fen,
+                                 "blunder_move_uci": blunder_move_uci,
+                                 "eval_before_cp": prev_eval,
+                                 "eval_after_cp": current_eval,
+                                 "eval_drop_cp": eval_delta # This will be negative
+                             }
+                             self.stats["blunder_positions"].append(blunder_info)
+                             processed_fens.add(blunder_fen)
+                             new_blunders_found += 1
+                             logger.debug(f"Blunder detected in game {game_idx+1}: Move {blunder_move_uci} from FEN {blunder_fen}, Eval drop {eval_delta}")
+
+                    # Push the moves to advance the board state for the next iteration
+                    board.push(chess.Move.from_uci(moves[move_idx]))
+                    if move_idx + 1 < len(moves): # Check if Black's response exists
+                        board.push(chess.Move.from_uci(moves[move_idx + 1]))
+
+            except Exception as game_e:
+                logger.error(f"Error analyzing game {game_idx+1} for blunders: {game_e}", exc_info=True)
+                continue # Skip to next game
+
+        logger.info(f"Blunder analysis complete. Found {new_blunders_found} new blunder positions.")
+        # Optionally save self.stats["blunder_positions"] to a file here
+        # blunder_file = os.path.join(self.current_run_dir or self.base_results_dir, "blunder_positions.json")
+        # with open(blunder_file, "w") as f:
+        #     json.dump(self.stats["blunder_positions"], f, indent=2)
+
+        return new_blunders_found
+
+# --- End of Part 3 ---
