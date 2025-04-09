@@ -178,3 +178,268 @@ class ChessBenchmark:
              logger.warning("Stockfish engine not available. Engine functionality will be limited.")
 
 # --- End of Part 1 ---
+
+# Part 2: Move Generation and Context Helpers
+
+class ChessBenchmark:
+    # (Includes __init__ from Part 1)
+    # ... (previous code from Part 1) ...
+
+    def _get_visual_board(self, board: chess.Board) -> str:
+        """
+        Generate a text-based visual representation of the board with rank/file labels.
+
+        Args:
+            board: The current chess.Board object.
+
+        Returns:
+            A string representing the board visually.
+        """
+        visual = str(board)
+        ranks = "87654321"
+        files = "  a b c d e f g h" # Add spacing for alignment
+        lines = visual.split("\n")
+
+        # Add rank labels to the right
+        for i, line in enumerate(lines):
+            lines[i] = line + " " + ranks[i]
+
+        # Add file labels at the bottom
+        lines.append(files)
+        return "\n".join(lines)
+
+    def detect_position_type(self, board: chess.Board) -> str:
+        """
+        Classify the position type (opening, middlegame, endgame) based on simple heuristics.
+        (Requirement 5)
+
+        Args:
+            board: The current chess.Board object.
+
+        Returns:
+            A string indicating the position type ("opening", "middlegame", "endgame").
+        """
+        piece_count = len(board.piece_map())
+        # Endgame definition: King + <= 5 other pieces total (adjust as needed)
+        if piece_count <= 6:
+            return "endgame"
+        # Opening definition: Within the first 10-12 full moves (adjust as needed)
+        elif board.fullmove_number <= 10:
+             # Check if major pieces are still mostly on back ranks (more robust check possible)
+            back_rank_pieces = 0
+            for square in chess.SQUARES:
+                piece = board.piece_at(square)
+                if piece and piece.piece_type != chess.PAWN:
+                    rank = chess.square_rank(square)
+                    if (piece.color == chess.WHITE and rank == 0) or \
+                       (piece.color == chess.BLACK and rank == 7):
+                        back_rank_pieces += 1
+            # If many major pieces still haven't moved, likely still opening phase
+            if back_rank_pieces > 8: # Heuristic threshold
+                 return "opening"
+            else:
+                 return "middlegame" # Transitioning out of opening
+        else:
+            return "middlegame"
+
+    def get_position_template(self, position_type: str) -> str:
+        """
+        Return a position-specific prompt template snippet based on the classified type.
+        (Requirement 5)
+
+        Args:
+            position_type: The type of position ("opening", "middlegame", "endgame").
+
+        Returns:
+            A string containing guidance for the LLM prompt.
+        """
+        templates = {
+            "opening": "Strategy: Focus on rapid development of minor pieces, controlling the center (e.g., e4, d4, e5, d5 squares), and ensuring king safety, often through castling. Avoid moving the same piece multiple times unless necessary.",
+            "middlegame": "Strategy: Look for tactical opportunities (forks, pins, skewers, discovered attacks). Formulate strategic plans based on pawn structures (e.g., open files for rooks, outpost squares for knights, pawn breaks). Coordinate your pieces towards attacking the opponent's king or key weaknesses.",
+            "endgame": "Strategy: King activity is crucial - centralize your king. Calculate precise move sequences, especially regarding pawn promotion. Understand key endgame principles like opposition, zugzwang, and creating passed pawns. Material advantage becomes more significant."
+        }
+        return templates.get(position_type, "Strategy: Analyze the position carefully to identify threats, opportunities, and the best strategic plan.") # Default fallback
+
+    def llm_make_move(self, board: chess.Board, conversation_history: str, current_eval: Optional[int], retry_count=0) -> Optional[str]:
+        """
+        Generate the next move for White using LLM with enhanced prompting (CoT, context)
+        and optional verification. (Requirements 1, 2, 5)
+
+        Args:
+            board: Current chess board state.
+            conversation_history: String containing previous moves in the game.
+            current_eval: The current Stockfish evaluation (in centipawns), if available.
+            retry_count: Internal counter for retry attempts.
+
+        Returns:
+            UCI move string (e.g., "e2e4") or None if unable to generate a valid move.
+        """
+        if not self.chat:
+            logger.error("LLM client not initialized. Cannot generate LLM move.")
+            return self.get_stockfish_move(board) # Fallback if LLM unavailable
+
+        if retry_count > self.max_retries_llm:
+            logger.warning(f"LLM failed to provide a valid move after {self.max_retries_llm} retries. Falling back to Stockfish.")
+            self.stats["illegal_moves_llm"] += 1
+            # Use default Stockfish settings for fallback
+            return self.get_stockfish_move(board, thinking_time=self.stockfish_timeout, depth=self.stockfish_eval_depth)
+
+        fen = board.fen()
+        visual_board = self._get_visual_board(board)
+        try:
+            legal_moves = [move.uci() for move in board.legal_moves]
+            if not legal_moves:
+                logger.warning("No legal moves available for LLM - game should be over.")
+                return None
+        except Exception as e:
+            logger.error(f"Error getting legal moves: {e}. Board FEN: {fen}")
+            return None # Cannot proceed without legal moves
+
+        # --- Enhanced Prompt Construction ---
+        position_type = self.detect_position_type(board)
+        position_guidance = self.get_position_template(position_type)
+
+        # Context: Current evaluation
+        eval_text = f"Current Stockfish evaluation: {current_eval / 100.0:.2f} pawns (positive is good for White)." if current_eval is not None else "Current Stockfish evaluation: Not available."
+
+        # Context: Recent Blunders (Requirement 2)
+        blunder_context = ""
+        if self.stats["recent_blunders"]:
+            blunder_context += "\nRecent significant mistakes (blunders) in previous moves to learn from:"
+            # Use max_recent_blunders_in_prompt to limit context
+            for blunder in self.stats["recent_blunders"][-self.max_recent_blunders_in_prompt:]:
+                # Note: 'reason' is hard to generate automatically, focusing on move and impact.
+                blunder_context += f"\n- Move {blunder['move']} led to an evaluation drop of approximately {-blunder['eval_drop'] / 100.0:.2f} pawns."
+
+        # Context: Conversation History (Limit length to avoid excessive tokens)
+        max_history_lines = 20 # Keep last 10 full moves (20 lines)
+        history_lines = conversation_history.strip().split('\n')
+        truncated_history = "\n".join(history_lines[-max_history_lines:]) if len(history_lines) > max_history_lines else conversation_history
+
+        # Chain-of-Thought Prompt (Requirement 1)
+        prompt = (
+            f"You are a focused chess AI playing as White. Your goal is to find the strongest move.\n"
+            f"Current board state (White=uppercase, Black=lowercase):\n{visual_board}\n"
+            f"FEN notation: {fen}\n"
+            f"Game phase: {position_type.capitalize()}\n"
+            f"{eval_text}\n"
+            f"Recent Move History (last {max_history_lines // 2} moves):\n{truncated_history}\n"
+            f"Legal moves (UCI format): {', '.join(legal_moves)}\n"
+            f"{blunder_context}\n\n"
+            f"Strategic Guidance for {position_type}: {position_guidance}\n\n"
+            "Task:\n"
+            "1. **Analyze the position:** Briefly consider material balance, piece activity, king safety, pawn structure, and immediate tactical threats/opportunities.\n"
+            "2. **Identify Candidate Moves:** List 2-3 promising candidate moves from the legal moves list.\n"
+            "3. **Think Step-by-Step:** For each candidate, briefly outline the main idea and potential consequence (e.g., 'Nf3 develops a piece and controls e5', 'e4e5 attacks the Nf6 knight').\n"
+            "4. **Select the Best Move:** Based on your analysis, choose the single best move.\n"
+            "5. **Output:** Respond ONLY with the chosen move in UCI notation (e.g., 'e2e4'). Do not include your analysis or any other text in the final output."
+        )
+
+        messages = [
+            SystemMessage(content=(
+                "You are a chess engine assistant. Analyze the given chess position thoroughly, "
+                "following the step-by-step reasoning process requested. "
+                "Your final output must be ONLY the single best move in UCI format (e.g., 'a1b1', 'e7e8q'). "
+                "No explanation, commentary, or analysis should accompany the final UCI move output."
+            )),
+            HumanMessage(content=prompt)
+        ]
+
+        start_time = time.time()
+        try:
+            response = self.chat.invoke(messages)
+            llm_output = response.content.strip()
+
+            # --- Strict Move Extraction and Validation ---
+            # Attempt to find a legal move directly within the output
+            extracted_move = None
+            possible_moves = llm_output.split() # Split in case there's extra text
+            potential_move = possible_moves[-1].lower() # Often the last word is the move
+
+            if potential_move in legal_moves:
+                 extracted_move = potential_move
+            else:
+                 # Fallback: Search the entire output for any legal move string
+                 for legal_uci in legal_moves:
+                    if legal_uci in llm_output.lower():
+                        # Be cautious: ensure it's likely the intended move, not just a substring
+                        # Check if it's a standalone word or at the end
+                        if f" {legal_uci} " in f" {llm_output.lower()} " or llm_output.lower().endswith(legal_uci):
+                             extracted_move = legal_uci
+                             logger.info(f"Extracted move '{extracted_move}' from potentially noisy output: '{llm_output}'")
+                             break
+
+            move_time = time.time() - start_time
+            self.stats["total_llm_move_time"] += move_time
+            # Increment move count only when a valid move is confirmed and pushed in play_game
+
+            if extracted_move and extracted_move in legal_moves:
+                logger.debug(f"LLM proposed move: {extracted_move} (Time: {move_time:.2f}s)")
+
+                # Optional: Shallow verification can be added here if desired,
+                # e.g., evaluate position after extracted_move using evaluate_position(..., depth=self.stockfish_verification_depth)
+                # and log if it seems tactically poor compared to initial eval.
+                # For now, we return the validated move directly.
+
+                return extracted_move
+            else:
+                logger.warning(f"LLM output '{llm_output}' did not contain a valid UCI move from the legal list: {legal_moves}. Retrying...")
+                return self.llm_make_move(board, conversation_history, current_eval, retry_count + 1)
+
+        except Exception as e:
+            logger.error(f"Error during LLM call or processing: {e}", exc_info=True)
+            return self.llm_make_move(board, conversation_history, current_eval, retry_count + 1)
+
+    def get_stockfish_move(self, board: chess.Board, thinking_time: Optional[float] = None, depth: Optional[int] = None) -> Optional[str]:
+        """
+        Get the best move from Stockfish engine.
+
+        Args:
+            board: Current chess board state.
+            thinking_time: Time limit for Stockfish (seconds). Uses self.stockfish_timeout if None.
+            depth: Depth limit for Stockfish. Uses self.stockfish_eval_depth if None.
+
+        Returns:
+            UCI move string or None if no legal moves or engine fails.
+        """
+        if not self.stockfish_available:
+            logger.error("Stockfish engine not available. Cannot get Stockfish move.")
+            # Fallback: random move if possible
+            legal_moves = list(board.legal_moves)
+            return random.choice(legal_moves).uci() if legal_moves else None
+
+        try:
+            if not list(board.legal_moves):
+                logger.warning("No legal moves available for Stockfish.")
+                return None
+
+            # Use provided limits or defaults from self
+            time_limit = thinking_time if thinking_time is not None else self.stockfish_timeout
+            depth_limit = depth if depth is not None else self.stockfish_eval_depth # Use eval_depth as default for opponent move
+
+            limit = chess.engine.Limit(time=time_limit, depth=depth_limit)
+
+            with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as stockfish:
+                # Configure skill level if needed (e.g., for weaker opponent simulation)
+                # stockfish.configure({"Skill Level": 10}) # Example: Elo ~1700
+                result = stockfish.play(board, limit)
+                if result.move:
+                    logger.debug(f"Stockfish move: {result.move.uci()}")
+                    return result.move.uci()
+                else:
+                    logger.warning("Stockfish analysis returned no move.")
+                    # Fallback to random if engine gives up unexpectedly
+                    legal_moves = list(board.legal_moves)
+                    return random.choice(legal_moves).uci() if legal_moves else None
+
+        except chess.engine.EngineTerminatedError:
+            logger.error("Stockfish engine terminated unexpectedly.")
+            self.stockfish_available = False # Mark as unavailable
+            legal_moves = list(board.legal_moves)
+            return random.choice(legal_moves).uci() if legal_moves else None
+        except Exception as e:
+            logger.error(f"Error interacting with Stockfish: {e}", exc_info=True)
+            legal_moves = list(board.legal_moves)
+            return random.choice(legal_moves).uci() if legal_moves else None
+
+# --- End of Part 2 ---
