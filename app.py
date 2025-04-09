@@ -15,6 +15,7 @@ from langchain_openai import ChatOpenAI
 from langchain.schema import SystemMessage, HumanMessage
 import matplotlib.pyplot as plt
 import logging
+import argparse
 
 # Load environment variables from the .env file
 load_dotenv()
@@ -88,7 +89,9 @@ ALL_POSITION_SETS = {
 
 
 class ChessBenchmark:
-    def __init__(self, llm_model="gpt-4", temperature=0.0, stockfish_depth=15, elo_k_factor=32):
+
+    def __init__(self, llm_model="gpt-4", temperature=0.0, stockfish_depth=15,
+                 elo_k_factor=32, stockfish_opponent_elo=2800):
         """
         Initialize the Chess Benchmark system.
 
@@ -181,7 +184,7 @@ class ChessBenchmark:
 
 # Part 2: Move Generation and Context Helpers
 
-class ChessBenchmark:
+# class ChessBenchmark:
     # (Includes __init__ from Part 1)
     # ... (previous code from Part 1) ...
 
@@ -447,7 +450,7 @@ class ChessBenchmark:
 
 # Part 3: Analysis, Evaluation, Saving, and Utility Methods
 
-class ChessBenchmark:
+# class ChessBenchmark:
     # ... (previous code from Part 1 and 2) ...
 
     def evaluate_position(self, board: chess.Board, depth: Optional[int] = None) -> Optional[int]:
@@ -846,7 +849,7 @@ class ChessBenchmark:
 
 # Part 4: Game Play, Benchmark Orchestration, and Curriculum Learning
 
-class ChessBenchmark:
+# class ChessBenchmark:
     # ... (previous code from Parts 1, 2, 3) ...
 
     # Add opponent Elo to init, default can be adjusted
@@ -1333,9 +1336,9 @@ class ChessBenchmark:
 
 # Part 5: Reporting, Visualization, and Main Execution
 
-import argparse # Ensure argparse is imported
 
-class ChessBenchmark:
+
+# class ChessBenchmark:
     # ... (previous code from Parts 1, 2, 3, 4) ...
 
     def generate_report(self, output_dir: Optional[str] = None) -> Dict[str, Any]:
