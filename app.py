@@ -141,7 +141,7 @@ class ChessBenchmark:
             logger.warning(f"Stockfish executable not found at {STOCKFISH_PATH}. Engine-related functions will be limited.")
 
 
-        # Statistics tracking - enhanced
+         # Statistics tracking - enhanced
         self.stats = {
             "games_played": 0,
             "llm_wins": 0,
@@ -154,7 +154,7 @@ class ChessBenchmark:
             "opening_success": 0, # Count games where a known opening was played by LLM
             "game_history": [],      # Stores detailed data per game
             "total_game_plies": 0,   # Sum of plies (half-moves) across all games
-            "eval_history_all": [],  # Stores eval history tuples (game_idx, move_num, eval)
+            "eval_history_all": [],  # Stores eval history tuples (game_idx, move_num, eval) - Not currently used, consider removing if game_history suffices
             "elo_rating": 1500,      # Starting Elo rating for the LLM
             "elo_history": [(0, 1500)], # Track Elo changes over games (game_num, elo)
             "recent_blunders": [],   # Stores last N blunders for prompt context (Requirement 2)
@@ -168,17 +168,28 @@ class ChessBenchmark:
         self.stockfish_timeout = 1.0 # Default thinking time for Stockfish opponent moves
         self.stockfish_eval_depth = stockfish_depth # Depth for position evaluation
         self.stockfish_verification_depth = 8 # Shallow depth for hybrid verification (Requirement 5)
+        self.stockfish_opponent_elo = stockfish_opponent_elo # Store opponent Elo
+
+                
+        print("DEBUG: About to define base_results_dir") # 
 
         # Create results directory if it doesn't exist
         self.base_results_dir = "benchmark_results"
         self.current_run_dir = None # Will be set in run_benchmark
         os.makedirs(self.base_results_dir, exist_ok=True)
 
-        logger.info(f"Initialized ChessBenchmark. LLM: {llm_model}, Temp: {temperature}, SF Depth: {stockfish_depth}")
+        print(f"DEBUG: base_results_dir defined: {hasattr(self, 'base_results_dir')}") # 
+        if hasattr(self, 'base_results_dir'):
+            print(f"DEBUG: Value is: {self.base_results_dir}")
+
+        logger.info(f"Initialized ChessBenchmark. LLM: {self.llm_model}, Temp: {self.temperature}, SF Depth: {self.stockfish_depth}")
         if not self.chat:
             logger.warning("LLM client not initialized. LLM functionality will be unavailable.")
         if not self.stockfish_available:
              logger.warning("Stockfish engine not available. Engine functionality will be limited.")
+
+     # --- End of __init__ method ---
+
 
 # --- End of Part 1 ---
 
@@ -1649,3 +1660,49 @@ if __name__ == "__main__":
 
 
 # --- End of Part 5 / End of File ---
+
+# DEBUGGER
+# --- Main Execution Block ---
+# if __name__ == "__main__":
+#     print("--- Starting Minimal Test ---")
+#     # --- Initialize Benchmark Class ---
+#     logger.info("Initializing ChessBenchmark for minimal test...")
+#     # Make sure argparse is imported at the top
+#     # import argparse
+#     # parser = argparse.ArgumentParser() # Minimal parser if needed for defaults
+#     # parser.add_argument('--model', type=str, default="gpt-3.5-turbo")
+#     # parser.add_argument('--temperature', type=float, default=0.0)
+#     # parser.add_argument('--depth', type=int, default=15)
+#     # parser.add_argument('--opponent_elo', type=int, default=2800)
+#     # parser.add_argument('--k_factor', type=int, default=32)
+#     # args = parser.parse_args([]) # Parse with defaults
+
+#     try:
+#         # ONLY initialize the class with some default values
+#         test_benchmark = ChessBenchmark(
+#              llm_model="gpt-3.5-turbo", # Use a default or cheap model
+#              temperature=0.0,
+#              stockfish_depth=15,
+#              elo_k_factor=32,
+#              stockfish_opponent_elo=2800
+#         )
+#         print("--- Initialization Attempted ---")
+
+#         # Directly check the attribute AFTER initialization
+#         print(f"Has base_results_dir? {hasattr(test_benchmark, 'base_results_dir')}")
+#         if hasattr(test_benchmark, 'base_results_dir'):
+#              print(f"Value: {test_benchmark.base_results_dir}")
+#         else:
+#              print("Attribute 'base_results_dir' is MISSING after init!")
+
+#         # Also check another attribute set earlier in __init__
+#         print(f"Has stockfish_available? {hasattr(test_benchmark, 'stockfish_available')}")
+
+
+#     except Exception as e:
+#         print(f"ERROR during minimal test: {e}")
+#         import traceback
+#         traceback.print_exc()
+
+#     print("--- Minimal Test Finished ---")
+#     logger.info("ChessBenchmark minimal test finished.")
