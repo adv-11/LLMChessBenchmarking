@@ -1,8 +1,7 @@
-======================================================================
 LLM CHESS BENCHMARK - DATA SUMMARY
-======================================================================
 
 LEADERBOARD DATA (N=12 models):
+
  Rank                  Model    Category  Elo  Win%  Draw%  Loss%  Blunder%  Illegal%  AvgTime
     1         o3-mini (High)   Reasoning 1923  68.2   24.1    7.7      12.3       1.2      4.2
     2            DeepSeek-R1   Reasoning 1876  64.8   26.3    8.9      14.8       2.1      5.1
@@ -18,6 +17,7 @@ LEADERBOARD DATA (N=12 models):
    12        Mistral Large 2 Open-Source 1124  16.2   42.1   41.7      52.8      44.2      2.2
 
 CATEGORY STATISTICS:
+
    Category  Mean_Elo  SD_Elo  Mean_Win%  Mean_Blunder%  Mean_Illegal%
   Reasoning      1880    41.2       65.1           14.2            1.7
    Frontier      1667   107.3       49.1           24.9           17.7
@@ -25,6 +25,7 @@ CATEGORY STATISTICS:
 Open-Source      1316   170.2       26.6           43.1           35.2
 
 PERFORMANCE VS DIFFICULTY:
+
             Model  SF_Depth_10  SF_Depth_15  SF_Depth_20
    o3-mini (High)         71.3         42.8          8.3
       DeepSeek-R1         67.8         38.6          6.1
@@ -34,12 +35,14 @@ Claude 3.5 Sonnet         49.7         18.2          0.8
    Gemini 2.0 Pro         46.3         14.9          0.4
 
 PHASE-SPECIFIC PERFORMANCE:
+
      Phase  Reasoning  Frontier  Open-Source
    Opening       76.3      62.4         48.7
 Middlegame       62.7      48.2         31.9
    Endgame       69.1      56.8         38.2
 
 CENTIPAWN LOSS BY PHASE:
+
      Phase  Reasoning  Reasoning_SD  Frontier  Frontier_SD  Open-Source  Open-Source_SD
    Opening       28.4          12.1      47.3         18.7         68.2            24.6
 Middlegame       52.7          21.4      89.6         31.2        127.4            42.8
